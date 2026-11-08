@@ -1,0 +1,1362 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>Aventura na Nuvem Voadora - Pequeno Guerreiro Thomas &amp; Mestre Fabio (Dragon Ball TV)</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #0b1d3a;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      color: #fff;
+    }
+    #gameCanvas {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+    }
+    /* HUD Superior para TV */
+    #hud {
+      position: fixed;
+      top: 12px;
+      left: 18px;
+      right: 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      pointer-events: none;
+      z-index: 10;
+    }
+    .hud-left-panel {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 6px;
+    }
+    .thomas-hud-frame {
+      position: relative;
+      width: clamp(290px, 34vw, 480px);
+      aspect-ratio: 600 / 210;
+      filter: drop-shadow(0 6px 16px rgba(0, 0, 0, 0.65));
+      transition: transform 0.2s ease, filter 0.2s ease;
+    }
+    .thomas-hud-frame.ssj-active {
+      filter: drop-shadow(0 0 18px rgba(255, 215, 0, 0.95)) drop-shadow(0 6px 18px rgba(255, 140, 0, 0.8));
+      transform: scale(1.03);
+    }
+    .thomas-hud-frame.hit-shake {
+      animation: hudHitShake 0.3s ease;
+    }
+    @keyframes hudHitShake {
+      0%, 100% { transform: translateX(0); }
+      25% { transform: translateX(-6px) rotate(-1deg); }
+      75% { transform: translateX(6px) rotate(1deg); }
+    }
+    .thomas-hud-img {
+      width: 100%;
+      height: 100%;
+      display: block;
+      object-fit: contain;
+    }
+    /* Máscara dinâmica sobre a barra verde de Vida (HP) da imagem photo_69.jpg */
+    .hud-hp-track {
+      position: absolute;
+      left: 3.1%;
+      top: 58.2%;
+      width: 66.5%;
+      height: 8.6%;
+      transform: skewX(22deg);
+      overflow: hidden;
+      border-radius: 2px;
+      pointer-events: none;
+    }
+    .hud-hp-deplete {
+      position: absolute;
+      top: 0;
+      left: 0;
+      bottom: 0;
+      width: 0%;
+      background: linear-gradient(180deg, rgba(25, 12, 8, 0.88), rgba(55, 22, 14, 0.92));
+      border-right: 2px solid rgba(255, 90, 90, 0.85);
+      transition: width 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+    }
+    /* Brilho / progresso dinâmico sobre a barra azul de Poder (Ki) da imagem photo_69.jpg */
+    .hud-ki-track {
+      position: absolute;
+      left: 27.6%;
+      top: 78.8%;
+      width: 44.0%;
+      height: 5.8%;
+      transform: skewX(22deg);
+      overflow: hidden;
+      border-radius: 2px;
+      pointer-events: none;
+    }
+    .hud-ki-deplete {
+      position: absolute;
+      top: 0;
+      left: 0;
+      bottom: 0;
+      width: 0%;
+      background: linear-gradient(180deg, rgba(15, 24, 42, 0.82), rgba(28, 42, 68, 0.88));
+      transition: width 0.25s ease;
+    }
+    .hud-ki-shimmer {
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.55) 50%, transparent 100%);
+      transform: translateX(-100%);
+      animation: kiShimmer 2.2s infinite;
+    }
+    .thomas-hud-frame.ssj-active .hud-ki-shimmer {
+      background: linear-gradient(90deg, rgba(255, 215, 0, 0.35), rgba(255, 255, 200, 0.9), rgba(255, 183, 3, 0.35));
+      animation-duration: 0.9s;
+    }
+    @keyframes kiShimmer {
+      0% { transform: translateX(-100%); }
+      100% { transform: translateX(100%); }
+    }
+    .hud-sub-stats {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      background: rgba(10, 22, 48, 0.82);
+      border: 2.5px solid #ffb703;
+      border-radius: 14px;
+      padding: 6px 16px;
+      box-shadow: 0 4px 14px rgba(0,0,0,0.45);
+      margin-left: 8px;
+    }
+    .hud-box {
+      background: rgba(10, 22, 48, 0.78);
+      border: 3px solid #ffb703;
+      border-radius: 18px;
+      padding: 10px 22px;
+      box-shadow: 0 6px 20px rgba(0,0,0,0.45), inset 0 0 12px rgba(255, 183, 3, 0.25);
+      display: flex;
+      align-items: center;
+      gap: 18px;
+    }
+    .score-text {
+      font-size: clamp(16px, 1.9vw, 26px);
+      font-weight: 900;
+      color: #ffd166;
+      text-shadow: 2px 2px 0 #000, 0 0 10px rgba(255, 183, 3, 0.8);
+      letter-spacing: 0.5px;
+    }
+    .stat-pill-text {
+      font-size: clamp(13px, 1.4vw, 19px);
+      font-weight: 800;
+      text-shadow: 1px 1px 0 #000;
+    }
+    .stat-hp {
+      color: #7ae582;
+    }
+    .stat-ki {
+      color: #4cc9f0;
+    }
+    .stat-lvl {
+      color: #ffb703;
+    }
+    .lives-text {
+      font-size: clamp(15px, 1.6vw, 22px);
+      font-weight: 800;
+      color: #7ae582;
+      text-shadow: 2px 2px 0 #000;
+    }
+    .db-tracker {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    .db-slot {
+      width: clamp(26px, 2.4vw, 36px);
+      height: clamp(26px, 2.4vw, 36px);
+      border-radius: 50%;
+      background: rgba(255,255,255,0.18);
+      border: 2px solid rgba(255, 183, 3, 0.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 900;
+      font-size: clamp(12px, 1.3vw, 18px);
+      color: rgba(255,255,255,0.45);
+      transition: transform 0.25s, background 0.25s;
+    }
+    .db-slot.collected {
+      background: radial-gradient(circle at 30% 30%, #ffe66d, #ff9f1c 60%, #e76f51);
+      border-color: #fff;
+      color: #b51717;
+      box-shadow: 0 0 14px #ffb703;
+      transform: scale(1.12);
+    }
+
+    /* Botões Laterais Grandes para Controle / Touch / Mouse na TV */
+    #touchControls {
+      position: fixed;
+      right: 24px;
+      bottom: 28px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      z-index: 20;
+    }
+    .ctrl-btn {
+      width: clamp(78px, 8vw, 118px);
+      height: clamp(78px, 8vw, 118px);
+      border-radius: 24px;
+      border: 4px solid #ffd166;
+      background: linear-gradient(180deg, rgba(255,159,28,0.92), rgba(230,57,70,0.92));
+      color: #fff;
+      font-size: clamp(32px, 3.8vw, 52px);
+      font-weight: 900;
+      cursor: pointer;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      transition: transform 0.1s;
+    }
+    .ctrl-btn span {
+      font-size: clamp(11px, 1.1vw, 15px);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-top: 2px;
+    }
+    .ctrl-btn:active, .ctrl-btn.active-key {
+      transform: scale(0.92);
+      background: linear-gradient(180deg, #ffd166, #ff9f1c);
+      color: #000;
+    }
+
+    /* Botão de Modo e Som no canto inferior esquerdo */
+    #leftControls {
+      position: fixed;
+      left: 24px;
+      bottom: 28px;
+      display: flex;
+      gap: 12px;
+      z-index: 20;
+    }
+    .action-pill {
+      border: 3px solid #ffd166;
+      background: rgba(10, 22, 48, 0.85);
+      color: #ffd166;
+      padding: 12px 20px;
+      border-radius: 16px;
+      font-size: clamp(14px, 1.5vw, 20px);
+      font-weight: 800;
+      cursor: pointer;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.45);
+    }
+    .action-pill:hover, .action-pill:focus {
+      background: #ffb703;
+      color: #000;
+      outline: none;
+    }
+
+    /* Tela Inicial / Overlay para TV */
+    #overlay {
+      position: fixed;
+      inset: 0;
+      background: radial-gradient(circle at center, rgba(16, 42, 86, 0.82), rgba(5, 12, 28, 0.94));
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 50;
+      padding: 20px;
+      text-align: center;
+    }
+    #overlay.hidden {
+      display: none;
+    }
+    .menu-card {
+      background: linear-gradient(180deg, rgba(20, 45, 92, 0.96), rgba(10, 22, 48, 0.98));
+      border: 5px solid #ffb703;
+      border-radius: 32px;
+      padding: clamp(20px, 3vw, 40px);
+      max-width: 960px;
+      width: 94%;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.75), 0 0 40px rgba(255, 183, 3, 0.35);
+    }
+    .title-db {
+      font-size: clamp(28px, 4.2vw, 56px);
+      font-weight: 900;
+      text-transform: uppercase;
+      background: linear-gradient(180deg, #fff3b0 0%, #ffb703 50%, #e63946 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      filter: drop-shadow(0 4px 0 #000);
+      margin-bottom: 8px;
+    }
+    .subtitle-db {
+      font-size: clamp(16px, 2vw, 24px);
+      color: #a8dadc;
+      margin-bottom: 22px;
+      font-weight: 600;
+    }
+    .mode-selector {
+      display: flex;
+      justify-content: center;
+      gap: clamp(12px, 2vw, 24px);
+      margin-bottom: 26px;
+      flex-wrap: wrap;
+    }
+    .mode-card {
+      background: rgba(255,255,255,0.07);
+      border: 4px solid rgba(255, 209, 102, 0.35);
+      border-radius: 22px;
+      padding: 14px 20px;
+      min-width: 210px;
+      cursor: pointer;
+      transition: transform 0.2s, border-color 0.2s, background 0.2s;
+    }
+    .mode-card.selected {
+      border-color: #ffd166;
+      background: linear-gradient(180deg, rgba(255, 183, 3, 0.28), rgba(230, 57, 70, 0.28));
+      transform: scale(1.06);
+      box-shadow: 0 0 25px rgba(255, 183, 3, 0.55);
+    }
+    .mode-card h3 {
+      font-size: clamp(17px, 1.9vw, 24px);
+      color: #ffd166;
+      margin-top: 8px;
+    }
+    .mode-card p {
+      font-size: clamp(13px, 1.3vw, 16px);
+      color: #e0fbfc;
+      margin-top: 4px;
+    }
+    .preview-imgs {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 6px;
+      height: 110px;
+    }
+    .preview-imgs img {
+      height: 105px;
+      width: auto;
+      filter: drop-shadow(0 4px 10px rgba(255, 183, 3, 0.6));
+    }
+    .start-btn {
+      background: linear-gradient(180deg, #ffb703, #fb8500, #e63946);
+      border: 4px solid #fff;
+      color: #fff;
+      font-size: clamp(22px, 2.8vw, 36px);
+      font-weight: 900;
+      padding: 16px 48px;
+      border-radius: 999px;
+      cursor: pointer;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      box-shadow: 0 10px 30px rgba(230, 57, 70, 0.6), 0 0 25px #ffb703;
+      animation: pulseBtn 1.4s infinite alternate;
+    }
+    @keyframes pulseBtn {
+      from { transform: scale(1); }
+      to { transform: scale(1.06); }
+    }
+    .tv-instructions {
+      margin-top: 22px;
+      background: rgba(0,0,0,0.38);
+      border-radius: 16px;
+      padding: 14px 20px;
+      font-size: clamp(14px, 1.6vw, 20px);
+      color: #f1faee;
+      line-height: 1.5;
+    }
+    .key-badge {
+      display: inline-block;
+      background: #ffd166;
+      color: #0b1d3a;
+      font-weight: 900;
+      padding: 2px 10px;
+      border-radius: 8px;
+      margin: 0 4px;
+    }
+  </style>
+</head>
+<body>
+  <!-- HUD Superior -->
+  <div id="hud">
+    <div class="hud-left-panel">
+      <div class="thomas-hud-frame" id="thomasHudFrame">
+        <img id="hudThomasImg" class="thomas-hud-img" alt="HUD Level de Vida e Poder - Thomas" />
+        <div class="hud-hp-track">
+          <div class="hud-hp-deplete" id="hpDepleteBar"></div>
+        </div>
+        <div class="hud-ki-track">
+          <div class="hud-ki-deplete" id="kiDepleteBar"></div>
+          <div class="hud-ki-shimmer"></div>
+        </div>
+      </div>
+      <div class="hud-sub-stats">
+        <div class="score-text">⭐ <span id="scoreVal">0</span> m</div>
+        <div class="stat-pill-text stat-lvl" id="lvlVal">⚡ Lvl 3</div>
+        <div class="stat-pill-text stat-hp" id="hpNumVal">💚 7078</div>
+        <div class="stat-pill-text stat-ki" id="kiNumVal">💠 117</div>
+        <div class="lives-text" id="livesVal">💚💚💚💚💚</div>
+      </div>
+    </div>
+    <div class="hud-box">
+      <span style="font-weight:800; color:#ffd166; font-size:clamp(14px,1.5vw,20px);">ESFERAS:</span>
+      <div class="db-tracker" id="dbTracker">
+        <div class="db-slot" data-star="1">1★</div>
+        <div class="db-slot" data-star="2">2★</div>
+        <div class="db-slot" data-star="3">3★</div>
+        <div class="db-slot" data-star="4">4★</div>
+        <div class="db-slot" data-star="5">5★</div>
+        <div class="db-slot" data-star="6">6★</div>
+        <div class="db-slot" data-star="7">7★</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Controles de Toque / Controle Remoto Visuais -->
+  <div id="touchControls">
+    <button class="ctrl-btn" id="btnUp" aria-label="Subir">
+      ⬆️<span>Subir</span>
+    </button>
+    <button class="ctrl-btn" id="btnDown" aria-label="Descer">
+      ⬇️<span>Descer</span>
+    </button>
+  </div>
+
+  <div id="leftControls">
+    <button class="action-pill" id="btnSwitchMode">👦 Modo: Pequeno Guerreiro Thomas</button>
+    <button class="action-pill" id="btnMusicTrack">🎵 Música: CHA-LA HEAD-CHA-LA</button>
+    <button class="action-pill" id="btnSound">🔊 Som: Ligado</button>
+  </div>
+
+  <!-- Menu Inicial / Fim de Jogo -->
+  <div id="overlay">
+    <div class="menu-card">
+      <div class="title-db" id="menuTitle">Aventura na Nuvem Voadora</div>
+      <div class="subtitle-db" id="menuSubtitle">Suba e desça com o controle da TV para desviar das montanhas!</div>
+
+      <div class="mode-selector" id="modeSelector">
+        <div class="mode-card selected" data-mode="son" onclick="selectMode('son')">
+          <div class="preview-imgs">
+            <img id="prevFilho2" alt="Pequeno Guerreiro Thomas" />
+          </div>
+          <h3>1. Pequeno Guerreiro Thomas</h3>
+          <p>Voar com o Guerreiro Thomas na Kinto'un</p>
+        </div>
+        <div class="mode-card" data-mode="father" onclick="selectMode('father')">
+          <div class="preview-imgs">
+            <img id="prevPai2" alt="Mestre Fabio" />
+          </div>
+          <h3>2. Mestre Fabio</h3>
+          <p>Voar com o Mestre Fabio na Kinto'un</p>
+        </div>
+      </div>
+
+      <button class="start-btn" id="btnStart" onclick="startGame()">▶️ COMEÇAR AVENTURA (OK / ENTER)</button>
+
+      <div class="tv-instructions">
+        📺 <strong>Controle da TV Samsung / Teclado:</strong><br/>
+        Use <span class="key-badge">⬆️ CIMA</span> e <span class="key-badge">⬇️ BAIXO</span> para subir e descer das montanhas &bull;
+        <span class="key-badge">⬅️</span> <span class="key-badge">➡️</span> escolhe o modo &bull;
+        <span class="key-badge">OK / ENTER</span> inicia!
+      </div>
+    </div>
+  </div>
+
+  <canvas id="gameCanvas"></canvas>
+
+  <script>
+    // Sprites em Base64 dos dois personagens reais em suas Nuvens Voadoras e HUD photo_69.jpg
+    const PAI_SPRITE_SRC = "data:image/png;base64,__B64_PAI__";
+    const FILHO_SPRITE_SRC = "data:image/png;base64,__B64_FILHO__";
+    const HUD_THOMAS_SPRITE_SRC = "data:image/png;base64,__B64_HUD_THOMAS__";
+
+    const imgPai = new Image();
+    const imgFilho = new Image();
+    imgPai.src = PAI_SPRITE_SRC;
+    imgFilho.src = FILHO_SPRITE_SRC;
+
+    document.getElementById("prevPai2").src = PAI_SPRITE_SRC;
+    document.getElementById("prevFilho2").src = FILHO_SPRITE_SRC;
+    document.getElementById("hudThomasImg").src = HUD_THOMAS_SPRITE_SRC;
+
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
+
+    let W = window.innerWidth;
+    let H = window.innerHeight;
+    function resize() {
+      W = window.innerWidth;
+      H = window.innerHeight;
+      canvas.width = W;
+      canvas.height = H;
+    }
+    window.addEventListener("resize", resize);
+    resize();
+
+    // Trilha Sonora Oficial (Dragon Ball Z: Battle of Gods Original Soundtrack) + Sintetizador de Efeitos
+    let soundEnabled = true;
+    let audioCtx = null;
+
+    const AUDIO_BASE = window.location.pathname.endsWith("/jogo") ? "jogo/audio/" : "audio/";
+    const SOUNDTRACK_LIST = [
+      { title: "CHA-LA HEAD-CHA-LA", src: AUDIO_BASE + "chala_main.mp3" },
+      { title: "HERO ~Kibou No Uta~", src: AUDIO_BASE + "hero_song.mp3" },
+      { title: "CHA-LA (Hero Son Goku)", src: AUDIO_BASE + "chala_hero.mp3" },
+      { title: "Hero (Gokuu)", src: AUDIO_BASE + "goku_hero.mp3" },
+      { title: "Super Saiyajin God", src: AUDIO_BASE + "ssj_god_power.mp3" },
+      { title: "Kami To No Shitou", src: AUDIO_BASE + "kami_shitou.mp3" },
+      { title: "Shenron Shutsugen", src: AUDIO_BASE + "shenron.mp3" },
+      { title: "CHA-LA (Heiwa)", src: AUDIO_BASE + "chala_peace.mp3" }
+    ];
+    let currentTrackIdx = 0;
+    const bgmAudio = new Audio();
+    bgmAudio.preload = "auto";
+    bgmAudio.volume = 0.55;
+    bgmAudio.src = SOUNDTRACK_LIST[currentTrackIdx].src;
+
+    function updateMusicButtonLabel() {
+      const btn = document.getElementById("btnMusicTrack");
+      if (btn) {
+        btn.textContent = `🎵 Música: ${SOUNDTRACK_LIST[currentTrackIdx].title}`;
+      }
+    }
+
+    function ensureBgmPlaying() {
+      if (!soundEnabled) return;
+      if (bgmAudio.paused) {
+        bgmAudio.play().catch(() => {});
+      }
+    }
+
+    function nextMusicTrack() {
+      currentTrackIdx = (currentTrackIdx + 1) % SOUNDTRACK_LIST.length;
+      bgmAudio.src = SOUNDTRACK_LIST[currentTrackIdx].src;
+      updateMusicButtonLabel();
+      if (soundEnabled) {
+        bgmAudio.play().catch(() => {});
+      }
+    }
+
+    bgmAudio.addEventListener("ended", () => {
+      nextMusicTrack();
+    });
+
+    function initAudio() {
+      if (!audioCtx) {
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if (AC) audioCtx = new AC();
+      }
+      if (audioCtx && audioCtx.state === "suspended") {
+        audioCtx.resume();
+      }
+      ensureBgmPlaying();
+    }
+
+    function playTone(freq, type, duration, vol = 0.12, slideTo = null) {
+      if (!soundEnabled || !audioCtx) return;
+      try {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = type;
+        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+        if (slideTo) {
+          osc.frequency.exponentialRampToValueAtTime(slideTo, audioCtx.currentTime + duration);
+        }
+        gain.gain.setValueAtTime(vol, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + duration);
+      } catch (e) {}
+    }
+
+    function sfxMove(up) {
+      playTone(up ? 340 : 280, "sine", 0.11, 0.07, up ? 520 : 210);
+    }
+    function sfxDragonBall() {
+      playTone(587.33, "triangle", 0.12, 0.16, 880);
+      setTimeout(() => playTone(880, "triangle", 0.22, 0.18, 1174.66), 90);
+    }
+    function sfxShenlong() {
+      const notes = [523.25, 659.25, 783.99, 1046.5, 1318.5];
+      notes.forEach((n, i) => setTimeout(() => playTone(n, "sawtooth", 0.28, 0.14), i * 110));
+    }
+    function sfxHit() {
+      playTone(160, "sawtooth", 0.3, 0.18, 55);
+    }
+
+    // Estado do Jogo
+    const MODES = ["son", "father"];
+    const MODE_LABELS = {
+      son: "👦 Modo: Pequeno Guerreiro Thomas",
+      father: "👨 Modo: Mestre Fabio"
+    };
+    let currentMode = "son";
+    let gameState = "menu"; // "menu" | "playing" | "gameover"
+    let score = 0;
+    let bestScore = 0;
+    let lives = 5;
+    let maxLives = 5;
+    let collectedStars = new Set();
+    let superSaiyanTimer = 0;
+    let invincibleTimer = 0;
+    let flashTimer = 0;
+    let shenlongBannerTimer = 0;
+
+    // Jogador (Nuvem Voadora)
+    const player = {
+      x: 240,
+      y: H * 0.5,
+      targetY: H * 0.5,
+      vy: 0,
+      tilt: 0,
+      radius: 54,
+      trail: []
+    };
+
+    // Controles (Suporte a Controle Remoto de TV Samsung Tizen, Android TV, Teclado e Touch)
+    let moveUpHeld = false;
+    let moveDownHeld = false;
+
+    function selectMode(m) {
+      initAudio();
+      currentMode = m;
+      document.querySelectorAll(".mode-card").forEach(el => {
+        el.classList.toggle("selected", el.getAttribute("data-mode") === m);
+      });
+      document.getElementById("btnSwitchMode").textContent = MODE_LABELS[m];
+    }
+
+    document.getElementById("btnSwitchMode").addEventListener("click", () => {
+      const nextIdx = (MODES.indexOf(currentMode) + 1) % MODES.length;
+      selectMode(MODES[nextIdx]);
+    });
+
+    document.getElementById("btnMusicTrack").addEventListener("click", () => {
+      initAudio();
+      nextMusicTrack();
+    });
+
+    document.getElementById("btnSound").addEventListener("click", () => {
+      soundEnabled = !soundEnabled;
+      document.getElementById("btnSound").textContent = soundEnabled ? "🔊 Som: Ligado" : "🔇 Som: Mudo";
+      if (soundEnabled) {
+        ensureBgmPlaying();
+      } else {
+        bgmAudio.pause();
+      }
+    });
+
+    function nudgeUp(stepMultiplier = 1) {
+      initAudio();
+      const step = H * 0.11 * stepMultiplier;
+      player.targetY = Math.max(H * 0.14, player.targetY - step);
+      sfxMove(true);
+    }
+
+    function nudgeDown(stepMultiplier = 1) {
+      initAudio();
+      const step = H * 0.11 * stepMultiplier;
+      player.targetY = Math.min(H * 0.85, player.targetY + step);
+      sfxMove(false);
+    }
+
+    // Eventos de Teclado / Controle Remoto Smart TV Samsung
+    window.addEventListener("keydown", (e) => {
+      const code = e.keyCode || e.which;
+      const key = e.key || "";
+
+      // CIMA: ArrowUp (38), W (87), ChannelUp (427)
+      const isUp = key === "ArrowUp" || key === "w" || key === "W" || code === 38 || code === 427;
+      // BAIXO: ArrowDown (40), S (83), ChannelDown (428)
+      const isDown = key === "ArrowDown" || key === "s" || key === "S" || code === 40 || code === 428;
+      // ESQUERDA / DIREITA para escolher personagem no menu
+      const isLeft = key === "ArrowLeft" || key === "a" || key === "A" || code === 37;
+      const isRight = key === "ArrowRight" || key === "d" || key === "D" || code === 39;
+      // OK / ENTER / ESPAÇO no controle da TV
+      const isOk = key === "Enter" || key === " " || code === 13 || code === 32 || code === 10252;
+
+      if (gameState !== "playing") {
+        if (isLeft) {
+          e.preventDefault();
+          const idx = (MODES.indexOf(currentMode) + MODES.length - 1) % MODES.length;
+          selectMode(MODES[idx]);
+          sfxMove(true);
+        } else if (isRight) {
+          e.preventDefault();
+          const idx = (MODES.indexOf(currentMode) + 1) % MODES.length;
+          selectMode(MODES[idx]);
+          sfxMove(false);
+        } else if (isOk || isUp || isDown) {
+          e.preventDefault();
+          startGame();
+        }
+        return;
+      }
+
+      if (isUp) {
+        e.preventDefault();
+        if (!moveUpHeld) nudgeUp(0.95);
+        moveUpHeld = true;
+        document.getElementById("btnUp").classList.add("active-key");
+      } else if (isDown) {
+        e.preventDefault();
+        if (!moveDownHeld) nudgeDown(0.95);
+        moveDownHeld = true;
+        document.getElementById("btnDown").classList.add("active-key");
+      } else if (key === "1" || code === 49) {
+        selectMode("son");
+      } else if (key === "2" || code === 50) {
+        selectMode("father");
+      }
+    });
+
+    window.addEventListener("keyup", (e) => {
+      const code = e.keyCode || e.which;
+      const key = e.key || "";
+      if (key === "ArrowUp" || key === "w" || key === "W" || code === 38 || code === 427) {
+        moveUpHeld = false;
+        document.getElementById("btnUp").classList.remove("active-key");
+      }
+      if (key === "ArrowDown" || key === "s" || key === "S" || code === 40 || code === 428) {
+        moveDownHeld = false;
+        document.getElementById("btnDown").classList.remove("active-key");
+      }
+    });
+
+    // Botões na tela (Touch / Mouse / Ponteiro da TV)
+    function bindHoldButton(btnId, isUpBtn) {
+      const btn = document.getElementById(btnId);
+      const startHold = (e) => {
+        e.preventDefault();
+        if (gameState !== "playing") {
+          startGame();
+          return;
+        }
+        if (isUpBtn) {
+          nudgeUp(0.95);
+          moveUpHeld = true;
+        } else {
+          nudgeDown(0.95);
+          moveDownHeld = true;
+        }
+        btn.classList.add("active-key");
+      };
+      const endHold = (e) => {
+        e.preventDefault();
+        if (isUpBtn) moveUpHeld = false;
+        else moveDownHeld = false;
+        btn.classList.remove("active-key");
+      };
+      btn.addEventListener("mousedown", startHold);
+      btn.addEventListener("mouseup", endHold);
+      btn.addEventListener("mouseleave", endHold);
+      btn.addEventListener("touchstart", startHold, { passive: false });
+      btn.addEventListener("touchend", endHold, { passive: false });
+    }
+    bindHoldButton("btnUp", true);
+    bindHoldButton("btnDown", false);
+
+    // Objetos do Cenário: Montanhas, Esferas do Dragão, Nuvens de Fundo e Partículas
+    let mountains = [];
+    let dragonBalls = [];
+    let bgClouds = [];
+    let floatingParticles = [];
+    let distanceAccumulator = 0;
+
+    function initScenery() {
+      bgClouds = [];
+      for (let i = 0; i < 8; i++) {
+        bgClouds.push({
+          x: Math.random() * W,
+          y: H * (0.08 + Math.random() * 0.55),
+          scale: 0.6 + Math.random() * 0.9,
+          speed: 0.5 + Math.random() * 0.8
+        });
+      }
+    }
+    initScenery();
+
+    function updateHud() {
+      document.getElementById("scoreVal").textContent = Math.floor(score);
+      document.getElementById("livesVal").textContent = "💚".repeat(Math.max(0, lives)) + "🖤".repeat(Math.max(0, maxLives - lives));
+
+      // Atualiza a barra de Vida (HP = base 7078 da photo_69.jpg)
+      const hpRatio = Math.max(0, Math.min(1, lives / maxLives));
+      const hpValue = Math.round(7078 * hpRatio);
+      const hpDepleteEl = document.getElementById("hpDepleteBar");
+      if (hpDepleteEl) {
+        hpDepleteEl.style.width = `${(1 - hpRatio) * 100}%`;
+      }
+      const hpNumEl = document.getElementById("hpNumVal");
+      if (hpNumEl) {
+        hpNumEl.textContent = `💚 ${hpValue}`;
+      }
+
+      // Atualiza Level (base Lvl 3 da photo_69.jpg + evolui a cada 250m) e Poder (base 117 + Esferas/Ki)
+      const currentLvl = 3 + Math.floor(score / 250);
+      const lvlEl = document.getElementById("lvlVal");
+      if (lvlEl) {
+        lvlEl.textContent = `⚡ Lvl ${currentLvl}`;
+      }
+
+      const kiRatio = superSaiyanTimer > 0
+        ? 1
+        : Math.min(1, 0.35 + (collectedStars.size / 7) * 0.65);
+      const kiDepleteEl = document.getElementById("kiDepleteBar");
+      if (kiDepleteEl) {
+        kiDepleteEl.style.width = `${(1 - kiRatio) * 100}%`;
+      }
+      const kiValue = superSaiyanTimer > 0
+        ? 999
+        : (117 + collectedStars.size * 25 + Math.floor(score * 0.2));
+      const kiNumEl = document.getElementById("kiNumVal");
+      if (kiNumEl) {
+        kiNumEl.textContent = superSaiyanTimer > 0 ? `🔥 ${kiValue} SSJ!` : `💠 ${kiValue}`;
+      }
+
+      const hudFrame = document.getElementById("thomasHudFrame");
+      if (hudFrame) {
+        hudFrame.classList.toggle("ssj-active", superSaiyanTimer > 0);
+      }
+
+      document.querySelectorAll("#dbTracker .db-slot").forEach(slot => {
+        const star = parseInt(slot.getAttribute("data-star"), 10);
+        slot.classList.toggle("collected", collectedStars.has(star));
+      });
+    }
+
+    function spawnMountainPair(startX) {
+      // Passagem ampla e amigável para jogar com criança na TV
+      const gapHeight = Math.max(250, H * 0.42);
+      const minCenter = gapHeight * 0.58 + 50;
+      const maxCenter = H - gapHeight * 0.58 - 50;
+      const gapCenterY = minCenter + Math.random() * Math.max(40, (maxCenter - minCenter));
+
+      const width = Math.max(200, W * 0.16);
+      const topHeight = Math.max(30, gapCenterY - gapHeight / 2);
+      const bottomY = Math.min(H - 30, gapCenterY + gapHeight / 2);
+      const bottomHeight = H - bottomY;
+
+      mountains.push({
+        x: startX,
+        width,
+        topHeight,
+        bottomY,
+        bottomHeight,
+        gapCenterY,
+        passed: false,
+        seed: Math.random() * 100
+      });
+
+      // Coloca uma Esfera do Dragão ou Semente dos Deuses no caminho!
+      const missingStars = [1, 2, 3, 4, 5, 6, 7].filter(s => !collectedStars.has(s));
+      const starNum = missingStars.length > 0
+        ? missingStars[Math.floor(Math.random() * missingStars.length)]
+        : (Math.floor(Math.random() * 7) + 1);
+
+      dragonBalls.push({
+        x: startX + width * 0.5,
+        y: gapCenterY + (Math.random() - 0.5) * (gapHeight * 0.35),
+        r: 26,
+        stars: starNum,
+        collected: false,
+        bobPhase: Math.random() * Math.PI * 2
+      });
+    }
+
+    function startGame() {
+      initAudio();
+      gameState = "playing";
+      score = 0;
+      lives = maxLives;
+      collectedStars.clear();
+      superSaiyanTimer = 0;
+      invincibleTimer = 0;
+      shenlongBannerTimer = 0;
+      player.x = Math.max(170, W * 0.22);
+      player.y = H * 0.5;
+      player.targetY = H * 0.5;
+      player.tilt = 0;
+      player.trail = [];
+      mountains = [];
+      dragonBalls = [];
+      floatingParticles = [];
+
+      const spacing = Math.max(460, W * 0.38);
+      for (let i = 1; i <= 4; i++) {
+        spawnMountainPair(W * 0.65 + i * spacing);
+      }
+
+      updateHud();
+      document.getElementById("overlay").classList.add("hidden");
+    }
+
+    function gameOver() {
+      gameState = "gameover";
+      bestScore = Math.max(bestScore, Math.floor(score));
+      document.getElementById("menuTitle").textContent = "Fim da Corrida nas Montanhas!";
+      document.getElementById("menuSubtitle").textContent =
+        `Distância percorrida: ${Math.floor(score)} m  •  Recorde: ${bestScore} m`;
+      document.getElementById("btnStart").textContent = "🔄 JOGAR NOVAMENTE (OK / ENTER)";
+      document.getElementById("overlay").classList.remove("hidden");
+    }
+
+    // Desenho do Cenário estilo Dragon Ball (Céu, Sol, Capsule Corp., Montanhas Paozu)
+    function drawBackground(time) {
+      const skyGrad = ctx.createLinearGradient(0, 0, 0, H);
+      if (superSaiyanTimer > 0) {
+        skyGrad.addColorStop(0, "#1a3a6c");
+        skyGrad.addColorStop(0.5, "#3a7ca5");
+        skyGrad.addColorStop(1, "#ffd166");
+      } else {
+        skyGrad.addColorStop(0, "#1d63b8");
+        skyGrad.addColorStop(0.55, "#56abff");
+        skyGrad.addColorStop(1, "#bfe3ff");
+      }
+      ctx.fillStyle = skyGrad;
+      ctx.fillRect(0, 0, W, H);
+
+      // Sol radiante no canto superior direito
+      const sunX = W * 0.85;
+      const sunY = H * 0.16;
+      const sunGrad = ctx.createRadialGradient(sunX, sunY, 10, sunX, sunY, 130);
+      sunGrad.addColorStop(0, "rgba(255, 250, 210, 0.95)");
+      sunGrad.addColorStop(0.4, "rgba(255, 209, 102, 0.45)");
+      sunGrad.addColorStop(1, "rgba(255, 209, 102, 0)");
+      ctx.fillStyle = sunGrad;
+      ctx.beginPath();
+      ctx.arc(sunX, sunY, 130, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Nuvens fofas estilo Anime
+      bgClouds.forEach(c => {
+        ctx.save();
+        ctx.translate(c.x, c.y);
+        ctx.scale(c.scale, c.scale);
+        ctx.fillStyle = "rgba(255, 255, 255, 0.78)";
+        ctx.beginPath();
+        ctx.arc(0, 0, 38, 0, Math.PI * 2);
+        ctx.arc(34, -10, 46, 0, Math.PI * 2);
+        ctx.arc(74, 0, 36, 0, Math.PI * 2);
+        ctx.arc(36, 14, 38, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      });
+
+      // Cordilheira distante e Cúpula da Capsule Corp. no horizonte
+      ctx.fillStyle = "rgba(68, 114, 168, 0.45)";
+      ctx.beginPath();
+      ctx.moveTo(0, H);
+      for (let x = 0; x <= W + 100; x += 120) {
+        const mh = H * 0.72 + Math.sin(x * 0.006 + time * 0.0003) * 55;
+        ctx.lineTo(x, mh);
+      }
+      ctx.lineTo(W, H);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // Desenha uma Montanha Estilo Dragon Ball (Monte Paozu com rochas em camadas e topo verde)
+    function drawPaozuMountain(m) {
+      const { x, width, topHeight, bottomY, bottomHeight } = m;
+
+      // 1. Montanha Superior (Penhasco Suspenso / Rocha do Desfiladeiro)
+      if (topHeight > 10) {
+        const gradTop = ctx.createLinearGradient(x, 0, x + width, topHeight);
+        gradTop.addColorStop(0, "#7f4f24");
+        gradTop.addColorStop(0.5, "#a66c38");
+        gradTop.addColorStop(1, "#582f0e");
+
+        ctx.fillStyle = gradTop;
+        ctx.beginPath();
+        ctx.moveTo(x - 18, 0);
+        ctx.lineTo(x + width + 18, 0);
+        ctx.lineTo(x + width * 0.86, topHeight - 22);
+        ctx.quadraticCurveTo(x + width * 0.5, topHeight + 14, x + width * 0.14, topHeight - 22);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.lineWidth = 4;
+        ctx.strokeStyle = "#3d1e05";
+        ctx.stroke();
+
+        // Veios rochosos internos
+        ctx.strokeStyle = "rgba(255, 214, 165, 0.25)";
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(x + width * 0.35, 10);
+        ctx.lineTo(x + width * 0.42, topHeight - 18);
+        ctx.moveTo(x + width * 0.65, 10);
+        ctx.lineTo(x + width * 0.58, topHeight - 18);
+        ctx.stroke();
+
+        // Vegetação pendurada na ponta da rocha superior
+        ctx.fillStyle = "#38b000";
+        ctx.beginPath();
+        ctx.ellipse(x + width * 0.5, topHeight - 8, width * 0.34, 14, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // 2. Montanha Inferior (Pico Monte Paozu que sobe do chão)
+      if (bottomHeight > 10) {
+        const gradBot = ctx.createLinearGradient(x, bottomY, x + width, H);
+        gradBot.addColorStop(0, "#b07d4b");
+        gradBot.addColorStop(0.5, "#8d5b2c");
+        gradBot.addColorStop(1, "#4a2508");
+
+        ctx.fillStyle = gradBot;
+        ctx.beginPath();
+        ctx.moveTo(x - 24, H);
+        ctx.lineTo(x + width * 0.12, bottomY + 24);
+        ctx.quadraticCurveTo(x + width * 0.5, bottomY - 16, x + width * 0.88, bottomY + 24);
+        ctx.lineTo(x + width + 24, H);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.lineWidth = 4;
+        ctx.strokeStyle = "#3d1e05";
+        ctx.stroke();
+
+        // Topo de grama verde vivo estilo Dragon Ball Z
+        const grassGrad = ctx.createLinearGradient(x, bottomY - 10, x, bottomY + 38);
+        grassGrad.addColorStop(0, "#70e000");
+        grassGrad.addColorStop(1, "#2b9348");
+        ctx.fillStyle = grassGrad;
+        ctx.beginPath();
+        ctx.ellipse(x + width * 0.5, bottomY + 14, width * 0.40, 22, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = "#1b4332";
+        ctx.stroke();
+      }
+    }
+
+    // Desenha uma Esfera do Dragão brilhante com suas estrelas vermelhas
+    function drawDragonBall(db, time) {
+      if (db.collected) return;
+      const by = db.y + Math.sin(time * 0.005 + db.bobPhase) * 9;
+
+      ctx.save();
+      ctx.translate(db.x, by);
+
+      // Brilho externo
+      const glow = ctx.createRadialGradient(0, 0, 6, 0, 0, db.r * 1.7);
+      glow.addColorStop(0, "rgba(255, 209, 102, 0.85)");
+      glow.addColorStop(1, "rgba(255, 159, 28, 0)");
+      ctx.fillStyle = glow;
+      ctx.beginPath();
+      ctx.arc(0, 0, db.r * 1.7, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Esfera laranja cristalina
+      const ballGrad = ctx.createRadialGradient(-8, -8, 3, 0, 0, db.r);
+      ballGrad.addColorStop(0, "#fff3b0");
+      ballGrad.addColorStop(0.35, "#ff9f1c");
+      ballGrad.addColorStop(0.85, "#e76f51");
+      ballGrad.addColorStop(1, "#9b2226");
+      ctx.fillStyle = ballGrad;
+      ctx.beginPath();
+      ctx.arc(0, 0, db.r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.lineWidth = 2.5;
+      ctx.strokeStyle = "#fff";
+      ctx.stroke();
+
+      // Número de estrelas
+      ctx.fillStyle = "#d90429";
+      ctx.font = "900 18px sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(`${db.stars}★`, 0, 1);
+
+      ctx.restore();
+    }
+
+    // Desenha os personagens (Pai e Filho) em suas Nuvens Voadoras Kinto'un
+    function drawPlayers(time) {
+      // Rastro dourado ondulante da Nuvem Voadora (Kinto'un)
+      for (let i = 0; i < player.trail.length; i++) {
+        const pt = player.trail[i];
+        const ratio = (i + 1) / player.trail.length;
+        ctx.save();
+        ctx.fillStyle = superSaiyanTimer > 0
+          ? `rgba(255, 240, 100, ${ratio * 0.75})`
+          : `rgba(255, 214, 70, ${ratio * 0.62})`;
+        ctx.beginPath();
+        ctx.arc(pt.x, pt.y + 34, 12 + ratio * 26, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+
+      // Piscar quando invencível após esbarrar
+      if (invincibleTimer > 0 && Math.floor(time / 90) % 2 === 0) {
+        ctx.globalAlpha = 0.55;
+      }
+
+      const drawSingleCharacter = (img, cx, cy, scale, label) => {
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(player.tilt);
+
+        // Aura Dourada Kinto'un / Super Saiyajin
+        const auraRadius = 82 * scale;
+        const aura = ctx.createRadialGradient(0, 10, 15, 0, 10, auraRadius);
+        if (superSaiyanTimer > 0) {
+          aura.addColorStop(0, "rgba(255, 255, 180, 0.95)");
+          aura.addColorStop(0.55, "rgba(255, 195, 0, 0.55)");
+          aura.addColorStop(1, "rgba(255, 140, 0, 0)");
+        } else {
+          aura.addColorStop(0, "rgba(255, 230, 109, 0.55)");
+          aura.addColorStop(0.65, "rgba(255, 183, 3, 0.22)");
+          aura.addColorStop(1, "rgba(255, 183, 3, 0)");
+        }
+        ctx.fillStyle = aura;
+        ctx.beginPath();
+        ctx.arc(0, 10, auraRadius, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Nuvem extra fofa dourada na base para integrar perfeitamente o personagem
+        ctx.fillStyle = "#ffd166";
+        for (let k = -2; k <= 2; k++) {
+          const puffX = k * 22 * scale;
+          const puffY = 44 * scale + Math.sin(time * 0.01 + k) * 4;
+          const puffR = (26 - Math.abs(k) * 3) * scale;
+          ctx.beginPath();
+          ctx.arc(puffX, puffY, puffR, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        // Imagem real recortada do Pai ou do Filho
+        const spriteH = 165 * scale;
+        const spriteW = img.width ? (img.width / img.height) * spriteH : 140 * scale;
+        ctx.drawImage(img, -spriteW / 2, -spriteH / 2 - 4 * scale, spriteW, spriteH);
+
+        // Etiqueta com nome acima
+        if (label) {
+          ctx.font = "800 13px sans-serif";
+          const textW = ctx.measureText(label).width;
+          const tagW = Math.max(68, textW + 20);
+          const tagH = 22;
+          ctx.fillStyle = "rgba(10, 22, 48, 0.82)";
+          ctx.strokeStyle = "#ffd166";
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.roundRect(-tagW / 2, -spriteH / 2 - 26, tagW, tagH, 8);
+          ctx.fill();
+          ctx.stroke();
+
+          ctx.fillStyle = "#ffd166";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText(label, 0, -spriteH / 2 - 15);
+        }
+
+        ctx.restore();
+      };
+
+      const bob = Math.sin(time * 0.006) * 5;
+      if (currentMode === "son") {
+        drawSingleCharacter(imgFilho, player.x, player.y + bob, 1.08, "GUERREIRO THOMAS");
+      } else {
+        drawSingleCharacter(imgPai, player.x, player.y + bob, 1.08, "MESTRE FABIO");
+      }
+
+      ctx.globalAlpha = 1;
+    }
+
+    // Loop Principal de Atualização e Renderização
+    let lastTime = performance.now();
+    function loop(now) {
+      const dt = Math.min(0.05, (now - lastTime) / 1000);
+      lastTime = now;
+
+      drawBackground(now);
+
+      // Anima nuvens de fundo
+      bgClouds.forEach(c => {
+        c.x -= c.speed * (gameState === "playing" ? 1.8 : 0.7);
+        if (c.x < -140) {
+          c.x = W + 120;
+          c.y = H * (0.08 + Math.random() * 0.55);
+        }
+      });
+
+      if (gameState === "playing") {
+        const speed = (superSaiyanTimer > 0 ? 420 : 285) + Math.min(140, score * 0.15);
+
+        // Movimento contínuo se segurar o botão CIMA ou BAIXO no controle
+        const holdSpeed = H * 0.62;
+        if (moveUpHeld) {
+          player.targetY = Math.max(H * 0.14, player.targetY - holdSpeed * dt);
+        }
+        if (moveDownHeld) {
+          player.targetY = Math.min(H * 0.85, player.targetY + holdSpeed * dt);
+        }
+
+        // Interpolação suave da Nuvem Voadora
+        const dy = player.targetY - player.y;
+        player.y += dy * Math.min(1, dt * 8.5);
+        player.tilt = Math.max(-0.28, Math.min(0.28, dy * 0.0022));
+
+        // Atualiza rastro dourado
+        player.trail.push({ x: player.x - 45, y: player.y });
+        if (player.trail.length > 18) player.trail.shift();
+        for (let i = 0; i < player.trail.length; i++) {
+          player.trail[i].x -= speed * dt * 0.85;
+        }
+
+        // Timers especiais
+        if (superSaiyanTimer > 0) superSaiyanTimer = Math.max(0, superSaiyanTimer - dt);
+        if (invincibleTimer > 0) invincibleTimer = Math.max(0, invincibleTimer - dt);
+        if (shenlongBannerTimer > 0) shenlongBannerTimer = Math.max(0, shenlongBannerTimer - dt);
+
+        // Atualiza pontuação por distância
+        score += dt * (superSaiyanTimer > 0 ? 18 : 10);
+        updateHud();
+
+        // Move e desenha montanhas
+        for (let i = mountains.length - 1; i >= 0; i--) {
+          const m = mountains[i];
+          m.x -= speed * dt;
+          drawPaozuMountain(m);
+
+          // Verifica colisão suave com a montanha
+          const hitX = player.x + 28 > m.x + 18 && player.x - 28 < m.x + m.width - 18;
+          const hitTop = player.y - 42 < m.topHeight - 10;
+          const hitBot = player.y + 42 > m.bottomY + 10;
+
+          if (hitX && (hitTop || hitBot)) {
+            if (superSaiyanTimer > 0) {
+              // No modo Super Saiyajin destrói a montanha e ganha bônus!
+              m.topHeight = 0;
+              m.bottomY = H;
+              m.bottomHeight = 0;
+              score += 25;
+              sfxDragonBall();
+            } else if (invincibleTimer <= 0) {
+              lives -= 1;
+              invincibleTimer = 1.8;
+              flashTimer = 0.25;
+              sfxHit();
+              const hudFrame = document.getElementById("thomasHudFrame");
+              if (hudFrame) {
+                hudFrame.classList.remove("hit-shake");
+                void hudFrame.offsetWidth;
+                hudFrame.classList.add("hit-shake");
+              }
+              // Empurra suavemente o jogador para o centro da passagem da montanha!
+              player.targetY = m.gapCenterY;
+              updateHud();
+              if (lives <= 0) {
+                gameOver();
+              }
+            }
+          }
+
+          if (!m.passed && m.x + m.width < player.x) {
+            m.passed = true;
+            score += 10;
+          }
+        }
+
+        // Gera novas montanhas continuamente
+        if (mountains.length > 0) {
+          const lastM = mountains[mountains.length - 1];
+          const spacing = Math.max(430, W * 0.36);
+          if (lastM.x < W - spacing) {
+            spawnMountainPair(W + 80);
+          }
+          if (mountains[0].x + mountains[0].width < -150) {
+            mountains.shift();
+          }
+        }
+
+        // Move e verifica coleta das Esferas do Dragão
+        for (let i = dragonBalls.length - 1; i >= 0; i--) {
+          const db = dragonBalls[i];
+          db.x -= speed * dt;
+          drawDragonBall(db, now);
+
+          if (!db.collected) {
+            const dist = Math.hypot(player.x - db.x, player.y - db.y);
+            if (dist < 78) {
+              db.collected = true;
+              collectedStars.add(db.stars);
+              score += 25;
+              sfxDragonBall();
+
+              // Se completou as 7 Esferas do Dragão -> Invoca Shenlong + Modo Super Saiyajin + Vida Extra!
+              if (collectedStars.size >= 7) {
+                collectedStars.clear();
+                superSaiyanTimer = 8.0;
+                shenlongBannerTimer = 4.0;
+                lives = Math.min(maxLives, lives + 1);
+                score += 150;
+                sfxShenlong();
+              }
+              updateHud();
+            }
+          }
+
+          if (db.x < -100) dragonBalls.splice(i, 1);
+        }
+
+        // Desenha Pai e Filho voando
+        drawPlayers(now);
+
+        // Banner quando completa as 7 Esferas do Dragão!
+        if (shenlongBannerTimer > 0) {
+          ctx.save();
+          ctx.fillStyle = "rgba(10, 22, 48, 0.88)";
+          ctx.strokeStyle = "#ffd166";
+          ctx.lineWidth = 4;
+          const bw = Math.min(W * 0.8, 680);
+          const bh = 86;
+          ctx.beginPath();
+          ctx.roundRect((W - bw) / 2, H * 0.15, bw, bh, 22);
+          ctx.fill();
+          ctx.stroke();
+
+          ctx.fillStyle = "#ffd166";
+          ctx.font = "900 26px sans-serif";
+          ctx.textAlign = "center";
+          ctx.fillText("🐉 7 ESFERAS REUNIDAS! PODER SUPER SAIYAJIN ATIVADO! ⚡", W / 2, H * 0.15 + 52);
+          ctx.restore();
+        }
+
+        // Efeito visual de esbarrão
+        if (flashTimer > 0) {
+          flashTimer = Math.max(0, flashTimer - dt);
+          ctx.fillStyle = `rgba(230, 57, 70, ${flashTimer * 1.2})`;
+          ctx.fillRect(0, 0, W, H);
+        }
+      } else {
+        // Anima os personagens suavemente ao fundo enquanto está no menu
+        player.x = W * 0.5;
+        player.y = H * 0.52;
+        drawPlayers(now);
+      }
+
+      requestAnimationFrame(loop);
+    }
+    updateHud();
+    requestAnimationFrame(loop);
+  </script>
+</body>
+</html>

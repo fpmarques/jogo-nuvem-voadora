@@ -1,0 +1,37 @@
+===================================================================
+COMO RODAR O JOGO NA SMART TV SAMSUNG (4 FORMAS DO MAIS FÁCIL AO AVANÇADO)
+===================================================================
+
+Nota importante sobre TVs Samsung:
+As Smart TVs da Samsung usam o sistema operacional TIZEN (que roda aplicativos em HTML5/JavaScript) ou, em alguns modelos portáteis/projetores, Android.
+
+-------------------------------------------------------------------
+OPÇÃO 1 (MAIS FÁCIL E IMEDIATA - 30 SEGUNDOS): PELO NAVEGADOR DA TV
+-------------------------------------------------------------------
+1. No controle remoto da TV Samsung, aperte o botão "Home" (casinha).
+2. Abra o aplicativo "Internet" (Navegador Web da Samsung).
+3. Digite o endereço online do seu jogo:
+   https://substances-broken-icq-molecules.trycloudflare.com
+4. Dica de Ouro: Clique no ícone de "Estrela / Favoritos" ou "Fixar na Tela Inicial da TV" no navegador da Samsung! Assim fica um ícone direto no menu da TV para você e seu filho abrirem com 1 clique sempre que quiserem!
+
+-------------------------------------------------------------------
+OPÇÃO 2 (ESPELHAMENTO SEM FIO DO CELULAR / PC PARA A TV):
+-------------------------------------------------------------------
+1. Abra o arquivo index.html no seu celular Android/iPhone ou PC.
+2. No celular Samsung, puxe a barra superior e toque em "Smart View" (ou "Transmitir / Cast" em outros Androids) e selecione sua TV Samsung.
+
+-------------------------------------------------------------------
+OPÇÃO 3 (INSTALAR DIRETO NA TV COMO APLICATIVO NATIVO DA SAMSUNG - TIZEN):
+-------------------------------------------------------------------
+Este pacote ZIP já inclui o arquivo oficial `config.xml` e `icon.png` no padrão Tizen TV da Samsung!
+Se você quiser instalar como um aplicativo nativo dentro da memória da TV:
+1. Na TV Samsung, vá em "Apps" -> digite "12345" no controle remoto para abrir a janela de "Developer Mode" (Modo Desenvolvedor).
+2. Marque "Developer Mode: ON" e coloque o IP do seu computador (na mesma rede Wi-Fi). Reinicie a TV.
+3. No computador, abra o Tizen Studio (gratuito da Samsung), vá em "File -> Import -> Tizen -> Web Project" e selecione esta pasta descompactada.
+4. Clique com o botão direito no projeto -> "Run As -> Tizen Web Application". O jogo será instalado direto no menu de aplicativos da sua TV Samsung!
+
+-------------------------------------------------------------------
+OPÇÃO 4 (SE A SUA TV / TV BOX RODAR ANDROID TV / GOOGLE TV):
+-------------------------------------------------------------------
+1. Descompacte este ZIP em um Pen Drive USB e conecte na TV.
+2. Abra qualquer gerenciador de arquivos (como "FX File Explorer" ou "File Manager+") ou navegador ("TV Bro" / "Chrome") na TV e abra o arquivo `index.html`.
