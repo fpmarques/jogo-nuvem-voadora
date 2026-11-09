@@ -404,13 +404,6 @@
           <div class="hud-ki-shimmer"></div>
         </div>
       </div>
-      <div class="hud-sub-stats">
-        <div class="score-text">⭐ <span id="scoreVal">0</span> m</div>
-        <div class="stat-pill-text stat-lvl" id="lvlVal">⚡ Lvl 3</div>
-        <div class="stat-pill-text stat-hp" id="hpNumVal">💚 7078</div>
-        <div class="stat-pill-text stat-ki" id="kiNumVal">💠 117</div>
-        <div class="lives-text" id="livesVal">💚💚💚💚💚</div>
-      </div>
     </div>
     <div class="hud-box">
       <span style="font-weight:800; color:#ffd166; font-size:clamp(14px,1.5vw,20px);">ESFERAS:</span>
@@ -434,12 +427,6 @@
     <button class="ctrl-btn" id="btnDown" aria-label="Descer">
       ⬇️<span>Descer</span>
     </button>
-  </div>
-
-  <div id="leftControls">
-    <button class="action-pill" id="btnSwitchMode">👦 Modo: Pequeno Guerreiro Thomas</button>
-    <button class="action-pill" id="btnMusicTrack">🎵 Música: CHA-LA HEAD-CHA-LA</button>
-    <button class="action-pill" id="btnSound">🔊 Som: Ligado</button>
   </div>
 
   <!-- Menu Inicial / Fim de Jogo -->
@@ -639,28 +626,38 @@
       document.querySelectorAll(".mode-card").forEach(el => {
         el.classList.toggle("selected", el.getAttribute("data-mode") === m);
       });
-      document.getElementById("btnSwitchMode").textContent = MODE_LABELS[m];
+      const switchBtn = document.getElementById("btnSwitchMode");
+      if (switchBtn) switchBtn.textContent = MODE_LABELS[m];
     }
 
-    document.getElementById("btnSwitchMode").addEventListener("click", () => {
-      const nextIdx = (MODES.indexOf(currentMode) + 1) % MODES.length;
-      selectMode(MODES[nextIdx]);
-    });
+    const btnSwitchModeEl = document.getElementById("btnSwitchMode");
+    if (btnSwitchModeEl) {
+      btnSwitchModeEl.addEventListener("click", () => {
+        const nextIdx = (MODES.indexOf(currentMode) + 1) % MODES.length;
+        selectMode(MODES[nextIdx]);
+      });
+    }
 
-    document.getElementById("btnMusicTrack").addEventListener("click", () => {
-      initAudio();
-      nextMusicTrack();
-    });
+    const btnMusicTrackEl = document.getElementById("btnMusicTrack");
+    if (btnMusicTrackEl) {
+      btnMusicTrackEl.addEventListener("click", () => {
+        initAudio();
+        nextMusicTrack();
+      });
+    }
 
-    document.getElementById("btnSound").addEventListener("click", () => {
-      soundEnabled = !soundEnabled;
-      document.getElementById("btnSound").textContent = soundEnabled ? "🔊 Som: Ligado" : "🔇 Som: Mudo";
-      if (soundEnabled) {
-        ensureBgmPlaying();
-      } else {
-        bgmAudio.pause();
-      }
-    });
+    const btnSoundEl = document.getElementById("btnSound");
+    if (btnSoundEl) {
+      btnSoundEl.addEventListener("click", () => {
+        soundEnabled = !soundEnabled;
+        btnSoundEl.textContent = soundEnabled ? "🔊 Som: Ligado" : "🔇 Som: Mudo";
+        if (soundEnabled) {
+          ensureBgmPlaying();
+        } else {
+          bgmAudio.pause();
+        }
+      });
+    }
 
     function nudgeUp(stepMultiplier = 1) {
       initAudio();
@@ -793,8 +790,14 @@
     initScenery();
 
     function updateHud() {
-      document.getElementById("scoreVal").textContent = Math.floor(score);
-      document.getElementById("livesVal").textContent = "💚".repeat(Math.max(0, lives)) + "🖤".repeat(Math.max(0, maxLives - lives));
+      const scoreEl = document.getElementById("scoreVal");
+      if (scoreEl) {
+        scoreEl.textContent = Math.floor(score);
+      }
+      const livesEl = document.getElementById("livesVal");
+      if (livesEl) {
+        livesEl.textContent = "💚".repeat(Math.max(0, lives)) + "🖤".repeat(Math.max(0, maxLives - lives));
+      }
 
       // Atualiza a barra de Vida (HP = base 7078 da photo_69.jpg)
       const hpRatio = Math.max(0, Math.min(1, lives / maxLives));
@@ -1319,26 +1322,6 @@
 
         // Desenha Pai e Filho voando
         drawPlayers(now);
-
-        // Banner quando completa as 7 Esferas do Dragão!
-        if (shenlongBannerTimer > 0) {
-          ctx.save();
-          ctx.fillStyle = "rgba(10, 22, 48, 0.88)";
-          ctx.strokeStyle = "#ffd166";
-          ctx.lineWidth = 4;
-          const bw = Math.min(W * 0.8, 680);
-          const bh = 86;
-          ctx.beginPath();
-          ctx.roundRect((W - bw) / 2, H * 0.15, bw, bh, 22);
-          ctx.fill();
-          ctx.stroke();
-
-          ctx.fillStyle = "#ffd166";
-          ctx.font = "900 26px sans-serif";
-          ctx.textAlign = "center";
-          ctx.fillText("🐉 7 ESFERAS REUNIDAS! PODER SUPER SAIYAJIN ATIVADO! ⚡", W / 2, H * 0.15 + 52);
-          ctx.restore();
-        }
 
         // Efeito visual de esbarrão
         if (flashTimer > 0) {
