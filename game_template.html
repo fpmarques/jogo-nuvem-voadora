@@ -4,6 +4,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <meta name="robots" content="noindex, nofollow" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
   <title>Aventura na Nuvem Voadora - Pequeno Guerreiro Thomas &amp; Mestre Fabio (Dragon Ball TV)</title>
   <style>
     * {
@@ -447,7 +450,7 @@
   <div id="overlay">
     <div class="menu-card">
       <div class="title-db" id="menuTitle">Aventura na Nuvem Voadora</div>
-      <div class="subtitle-db" id="menuSubtitle">Suba e desça com o controle da TV para desviar das montanhas!</div>
+      <div class="subtitle-db" id="menuSubtitle">Suba e desça com o controle da TV e solte o ☄️ KAMEHAMEHA nas Montanhas de Pedras!</div>
 
       <div class="mode-selector" id="modeSelector">
         <div class="mode-card selected" data-mode="son" onclick="selectMode('son')">
@@ -1142,8 +1145,8 @@
       const bottomY = Math.min(H - 30, gapCenterY + gapHeight / 2);
       const bottomHeight = H - bottomY;
 
-      // A cada 2 montanhas (após a 1ª), surge uma Montanha de Pedras Mais Forte que pode ser destruída com o Kamehameha!
-      const isStoneMountain = mountainSpawnCount >= 2 && (mountainSpawnCount % 2 === 0 || Math.random() < 0.35);
+      // Já a partir da 1ª montanha surgem Montanhas de Pedras Mais Fortes que podem ser destruídas com o Kamehameha!
+      const isStoneMountain = (mountainSpawnCount % 2 === 1) || Math.random() < 0.4;
 
       mountains.push({
         x: startX,
