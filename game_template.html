@@ -455,15 +455,15 @@
       <button class="start-btn" id="btnStart" onclick="startGame()">▶️ COMEÇAR AVENTURA (OK / ENTER)</button>
 
       <div class="tv-instructions">
-        📺 <strong>Controle da TV Samsung / Teclado:</strong><br/>
-        Use <span class="key-badge">⬆️ CIMA</span> e <span class="key-badge">⬇️ BAIXO</span> para subir e descer das montanhas &bull;
-        <span class="key-badge">⬅️</span> <span class="key-badge">➡️</span> escolhe o modo &bull;
+        📺 <strong>Controle da TV Samsung UN43DU8000GXZD / Teclado:</strong><br/>
+        Basta apertar <span class="key-badge">⬆️ CIMA</span> e <span class="key-badge">⬇️ BAIXO</span> no controle (a nuvem acompanha o controle sem precisar clicar nos botões!) &bull;
+        Também funciona pelo botão <span class="key-badge">CH ⬆️/⬇️</span> ou encostando o cursor em ⬆️/⬇️ &bull;
         <span class="key-badge">OK / ENTER</span> inicia!
       </div>
     </div>
   </div>
 
-  <canvas id="gameCanvas"></canvas>
+  <canvas id="gameCanvas" tabindex="0" style="outline:none;"></canvas>
 
   <script>
     // Sprites em Base64 dos dois personagens reais em suas Nuvens Voadoras e HUD photo_69.jpg
@@ -616,9 +616,57 @@
       trail: []
     };
 
-    // Controles (Suporte a Controle Remoto de TV Samsung Tizen, Android TV, Teclado e Touch)
+    // Controles (Suporte Nativo a Controle Remoto de TV Samsung UN43DU8000GXZD Tizen, Ponteiro da TV, Canal CH, Teclado e Touch)
     let moveUpHeld = false;
     let moveDownHeld = false;
+    let hoverUpHeld = false;
+    let hoverDownHeld = false;
+    let lastPointerY = null;
+    let lastPointerMoveTime = 0;
+    let lastPointerSfxTime = 0;
+    let gameStartTimestamp = 0;
+    let btnFlashTimeoutUp = null;
+    let btnFlashTimeoutDown = null;
+
+    // Registra teclas extras do controle remoto em TVs Samsung Tizen (quando aplicável)
+    try {
+      if (window.tizen && window.tizen.tvinputdevice) {
+        const extraKeys = [
+          "ChannelUp", "ChannelDown",
+          "ColorF0Red", "ColorF1Green", "ColorF2Yellow", "ColorF3Blue",
+          "MediaPlayPause", "MediaPlay"
+        ];
+        extraKeys.forEach(k => {
+          try { window.tizen.tvinputdevice.registerKey(k); } catch (err) {}
+        });
+      }
+    } catch (err) {}
+
+    function keepCanvasFocused() {
+      try {
+        if (document.activeElement !== canvas) {
+          canvas.focus({ preventScroll: true });
+        }
+      } catch (e) {}
+    }
+    window.addEventListener("load", keepCanvasFocused);
+
+    function flashDirectionButton(isUp) {
+      const btn = document.getElementById(isUp ? "btnUp" : "btnDown");
+      if (!btn) return;
+      btn.classList.add("active-key");
+      if (isUp) {
+        clearTimeout(btnFlashTimeoutUp);
+        btnFlashTimeoutUp = setTimeout(() => {
+          if (!moveUpHeld && !hoverUpHeld) btn.classList.remove("active-key");
+        }, 180);
+      } else {
+        clearTimeout(btnFlashTimeoutDown);
+        btnFlashTimeoutDown = setTimeout(() => {
+          if (!moveDownHeld && !hoverDownHeld) btn.classList.remove("active-key");
+        }, 180);
+      }
+    }
 
     function selectMode(m) {
       initAudio();
@@ -663,6 +711,7 @@
       initAudio();
       const step = H * 0.11 * stepMultiplier;
       player.targetY = Math.max(H * 0.14, player.targetY - step);
+      flashDirectionButton(true);
       sfxMove(true);
     }
 
@@ -670,23 +719,129 @@
       initAudio();
       const step = H * 0.11 * stepMultiplier;
       player.targetY = Math.min(H * 0.85, player.targetY + step);
+      flashDirectionButton(false);
       sfxMove(false);
     }
 
-    // Eventos de Teclado / Controle Remoto Smart TV Samsung
-    window.addEventListener("keydown", (e) => {
-      const code = e.keyCode || e.which;
+    // 1. SUPORTE AO PONTEIRO DO NAVEGADOR DA TV SAMSUNG (UN43DU8000GXZD):
+    // No navegador "Internet" da TV Samsung, apertar CIMA e BAIXO no controle remoto move o ponteiro virtual na tela.
+    // Aqui convertemos o movimento vertical do ponteiro diretamente em subida/descida da Nuvem Voadora, sem precisar clicar!
+    function handleTvPointerMove(clientY) {
+      if (typeof clientY !== "number" || isNaN(clientY)) return;
+      const now = performance.now();
+      lastPointerMoveTime = now;
+
+      if (gameState !== "playing") {
+        lastPointerY = clientY;
+        return;
+      }
+
+      // Ignora o primeiro frame logo após clicar em "Começar" para sincronizar a referência
+      if (lastPointerY === null || now - gameStartTimestamp < 160) {
+        lastPointerY = clientY;
+        return;
+      }
+
+      const dy = clientY - lastPointerY;
+      lastPointerY = clientY;
+
+      if (Math.abs(dy) >= 0.8) {
+        // Sensibilidade amplificada (1.85x) para que poucos toques para cima/baixo no controle atravessem toda a tela
+        const sensitivity = 1.85;
+        player.targetY = Math.max(H * 0.14, Math.min(H * 0.85, player.targetY + dy * sensitivity));
+
+        if (dy < -1.5) {
+          flashDirectionButton(true);
+          if (now - lastPointerSfxTime > 150) {
+            lastPointerSfxTime = now;
+            initAudio();
+            sfxMove(true);
+          }
+        } else if (dy > 1.5) {
+          flashDirectionButton(false);
+          if (now - lastPointerSfxTime > 150) {
+            lastPointerSfxTime = now;
+            initAudio();
+            sfxMove(false);
+          }
+        }
+      }
+
+      // Se o ponteiro encostar no topo ou na base da TV, garante que a nuvem suba/desça até o limite
+      if (clientY <= 22) {
+        player.targetY = Math.max(H * 0.14, player.targetY - H * 0.06);
+        flashDirectionButton(true);
+      } else if (clientY >= H - 22) {
+        player.targetY = Math.min(H * 0.85, player.targetY + H * 0.06);
+        flashDirectionButton(false);
+      }
+    }
+
+    window.addEventListener("pointermove", (e) => {
+      handleTvPointerMove(e.clientY);
+    }, { passive: true });
+
+    window.addEventListener("mousemove", (e) => {
+      handleTvPointerMove(e.clientY);
+    }, { passive: true });
+
+    // 2. SUPORTE A ROLAGEM / BOTÃO DE CANAL (CH CIMA / CH BAIXO) NO CONTROLE DA TV SAMSUNG:
+    window.addEventListener("wheel", (e) => {
+      keepCanvasFocused();
+      if (gameState !== "playing") return;
+      if (e.deltaY < -1) {
+        e.preventDefault();
+        nudgeUp(0.95);
+      } else if (e.deltaY > 1) {
+        e.preventDefault();
+        nudgeDown(0.95);
+      }
+    }, { passive: false });
+
+    // 3. SUPORTE A CLIQUE (BOTÃO CENTRAL OK DO CONTROLE) EM QUALQUER LUGAR DA TELA:
+    canvas.addEventListener("mousedown", (e) => {
+      keepCanvasFocused();
+      if (gameState !== "playing") return;
+      lastPointerY = e.clientY;
+      // Clicar acima da altura atual da nuvem faz subir; clicar abaixo faz descer
+      if (e.clientY < player.y) {
+        nudgeUp(1.0);
+      } else {
+        nudgeDown(1.0);
+      }
+    });
+
+    // 4. EVENTOS DE TECLADO / CONTROLE REMOTO SMART TV SAMSUNG (D-Pad, Tizen KeyCodes, Canal, Números)
+    function handleKeyDown(e) {
+      const code = e.keyCode || e.which || 0;
       const key = e.key || "";
 
-      // CIMA: ArrowUp (38), W (87), ChannelUp (427)
-      const isUp = key === "ArrowUp" || key === "w" || key === "W" || code === 38 || code === 427;
-      // BAIXO: ArrowDown (40), S (83), ChannelDown (428)
-      const isDown = key === "ArrowDown" || key === "s" || key === "S" || code === 40 || code === 428;
+      // CIMA: ArrowUp (38), Up, W (87), PageUp (33), ChannelUp (427), Tizen Up (29460), TrackPrev (10232), Red (403), Numpad8 (104)
+      const isUp =
+        key === "ArrowUp" || key === "Up" || key === "w" || key === "W" ||
+        key === "PageUp" || key === "ChannelUp" || key === "ColorF0Red" ||
+        code === 38 || code === 87 || code === 33 || code === 427 ||
+        code === 29460 || code === 10232 || code === 403 || code === 104;
+
+      // BAIXO: ArrowDown (40), Down, S (83), PageDown (34), ChannelDown (428), Tizen Down (29461), TrackNext (10233), Green (404), Numpad2 (98)
+      const isDown =
+        key === "ArrowDown" || key === "Down" || key === "s" || key === "S" ||
+        key === "PageDown" || key === "ChannelDown" || key === "ColorF1Green" ||
+        code === 40 || code === 83 || code === 34 || code === 428 ||
+        code === 29461 || code === 10233 || code === 404 || code === 98;
+
       // ESQUERDA / DIREITA para escolher personagem no menu
-      const isLeft = key === "ArrowLeft" || key === "a" || key === "A" || code === 37;
-      const isRight = key === "ArrowRight" || key === "d" || key === "D" || code === 39;
-      // OK / ENTER / ESPAÇO no controle da TV
-      const isOk = key === "Enter" || key === " " || code === 13 || code === 32 || code === 10252;
+      const isLeft =
+        key === "ArrowLeft" || key === "Left" || key === "a" || key === "A" ||
+        code === 37 || code === 65 || code === 29462 || code === 100;
+      const isRight =
+        key === "ArrowRight" || key === "Right" || key === "d" || key === "D" ||
+        code === 39 || code === 68 || code === 29463 || code === 102;
+
+      // OK / ENTER / ESPAÇO / PLAY no controle da TV Samsung (13, 32, 29443, 10252, 415)
+      const isOk =
+        key === "Enter" || key === " " || key === "Select" ||
+        code === 13 || code === 32 || code === 29443 || code === 10252 || code === 415;
 
       if (gameState !== "playing") {
         if (isLeft) {
@@ -716,31 +871,58 @@
         if (!moveDownHeld) nudgeDown(0.95);
         moveDownHeld = true;
         document.getElementById("btnDown").classList.add("active-key");
+      } else if (isOk) {
+        e.preventDefault();
+        // Se apertar OK no controle durante o jogo, impulsiona para o centro da próxima passagem (ou para cima)
+        if (mountains.length > 0) {
+          const nextM = mountains.find(m => m.x + m.width > player.x - 20) || mountains[0];
+          if (nextM && player.y > nextM.gapCenterY) {
+            nudgeUp(0.95);
+          } else {
+            nudgeDown(0.95);
+          }
+        } else {
+          nudgeUp(0.95);
+        }
       } else if (key === "1" || code === 49) {
         selectMode("son");
       } else if (key === "2" || code === 50) {
         selectMode("father");
       }
-    });
+    }
 
-    window.addEventListener("keyup", (e) => {
-      const code = e.keyCode || e.which;
+    function handleKeyUp(e) {
+      const code = e.keyCode || e.which || 0;
       const key = e.key || "";
-      if (key === "ArrowUp" || key === "w" || key === "W" || code === 38 || code === 427) {
+      if (
+        key === "ArrowUp" || key === "Up" || key === "w" || key === "W" ||
+        key === "PageUp" || key === "ChannelUp" || key === "ColorF0Red" ||
+        code === 38 || code === 87 || code === 33 || code === 427 ||
+        code === 29460 || code === 10232 || code === 403 || code === 104
+      ) {
         moveUpHeld = false;
-        document.getElementById("btnUp").classList.remove("active-key");
+        if (!hoverUpHeld) document.getElementById("btnUp").classList.remove("active-key");
       }
-      if (key === "ArrowDown" || key === "s" || key === "S" || code === 40 || code === 428) {
+      if (
+        key === "ArrowDown" || key === "Down" || key === "s" || key === "S" ||
+        key === "PageDown" || key === "ChannelDown" || key === "ColorF1Green" ||
+        code === 40 || code === 83 || code === 34 || code === 428 ||
+        code === 29461 || code === 10233 || code === 404 || code === 98
+      ) {
         moveDownHeld = false;
-        document.getElementById("btnDown").classList.remove("active-key");
+        if (!hoverDownHeld) document.getElementById("btnDown").classList.remove("active-key");
       }
-    });
+    }
 
-    // Botões na tela (Touch / Mouse / Ponteiro da TV)
+    window.addEventListener("keydown", handleKeyDown, { passive: false });
+    window.addEventListener("keyup", handleKeyUp, { passive: false });
+
+    // 5. BOTÕES NA TELA (Funcionam tanto Clicando quanto apenas Encostando o Ponteiro da TV em cima!)
     function bindHoldButton(btnId, isUpBtn) {
       const btn = document.getElementById(btnId);
       const startHold = (e) => {
         e.preventDefault();
+        keepCanvasFocused();
         if (gameState !== "playing") {
           startGame();
           return;
@@ -755,14 +937,41 @@
         btn.classList.add("active-key");
       };
       const endHold = (e) => {
-        e.preventDefault();
+        if (e) e.preventDefault();
         if (isUpBtn) moveUpHeld = false;
         else moveDownHeld = false;
+        if ((isUpBtn && !hoverUpHeld) || (!isUpBtn && !hoverDownHeld)) {
+          btn.classList.remove("active-key");
+        }
+      };
+      // Basta apontar o cursor da TV sobre o botão Subir/Descer para ativar continuamente sem precisar clicar
+      const startHover = () => {
+        if (gameState !== "playing") return;
+        initAudio();
+        if (isUpBtn) {
+          hoverUpHeld = true;
+          sfxMove(true);
+        } else {
+          hoverDownHeld = true;
+          sfxMove(false);
+        }
+        btn.classList.add("active-key");
+      };
+      const endHover = () => {
+        if (isUpBtn) {
+          hoverUpHeld = false;
+          moveUpHeld = false;
+        } else {
+          hoverDownHeld = false;
+          moveDownHeld = false;
+        }
         btn.classList.remove("active-key");
       };
+
+      btn.addEventListener("mouseenter", startHover);
+      btn.addEventListener("mouseleave", endHover);
       btn.addEventListener("mousedown", startHold);
       btn.addEventListener("mouseup", endHold);
-      btn.addEventListener("mouseleave", endHold);
       btn.addEventListener("touchstart", startHold, { passive: false });
       btn.addEventListener("touchend", endHold, { passive: false });
     }
@@ -886,6 +1095,11 @@
     function startGame() {
       initAudio();
       gameState = "playing";
+      gameStartTimestamp = performance.now();
+      moveUpHeld = false;
+      moveDownHeld = false;
+      hoverUpHeld = false;
+      hoverDownHeld = false;
       score = 0;
       lives = maxLives;
       collectedStars.clear();
@@ -908,6 +1122,7 @@
 
       updateHud();
       document.getElementById("overlay").classList.add("hidden");
+      keepCanvasFocused();
     }
 
     function gameOver() {
@@ -1203,12 +1418,31 @@
       if (gameState === "playing") {
         const speed = (superSaiyanTimer > 0 ? 420 : 285) + Math.min(140, score * 0.15);
 
-        // Movimento contínuo se segurar o botão CIMA ou BAIXO no controle
+        // Movimento contínuo se segurar o botão CIMA ou BAIXO no controle ou encostar o ponteiro no botão
         const holdSpeed = H * 0.62;
-        if (moveUpHeld) {
+        let gpUp = false;
+        let gpDown = false;
+        if (navigator.getGamepads) {
+          try {
+            const pads = navigator.getGamepads();
+            for (let p = 0; p < pads.length; p++) {
+              const pad = pads[p];
+              if (!pad) continue;
+              if ((pad.buttons[12] && pad.buttons[12].pressed) || (pad.axes[1] && pad.axes[1] < -0.35)) gpUp = true;
+              if ((pad.buttons[13] && pad.buttons[13].pressed) || (pad.axes[1] && pad.axes[1] > 0.35)) gpDown = true;
+            }
+          } catch (e) {}
+        }
+
+        // Assistência contínua quando o ponteiro da TV está encostado nas bordas superior/inferior da tela
+        const pointerActiveRecently = (now - lastPointerMoveTime) < 1200 && lastPointerY !== null;
+        const edgeUp = pointerActiveRecently && lastPointerY < H * 0.12;
+        const edgeDown = pointerActiveRecently && lastPointerY > H * 0.88;
+
+        if (moveUpHeld || hoverUpHeld || gpUp || edgeUp) {
           player.targetY = Math.max(H * 0.14, player.targetY - holdSpeed * dt);
         }
-        if (moveDownHeld) {
+        if (moveDownHeld || hoverDownHeld || gpDown || edgeDown) {
           player.targetY = Math.min(H * 0.85, player.targetY + holdSpeed * dt);
         }
 
