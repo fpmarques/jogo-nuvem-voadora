@@ -402,6 +402,41 @@
       border-radius: 8px;
       margin: 0 4px;
     }
+    .start-btn:focus-visible, .mode-card:focus-visible, .ctrl-btn:focus-visible {
+      outline: 4px solid #00f5d4;
+      outline-offset: 4px;
+    }
+    .hud-dist-badge {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding-right: 14px;
+      border-right: 2px solid rgba(255, 183, 3, 0.45);
+      font-size: clamp(15px, 1.6vw, 22px);
+      font-weight: 900;
+      color: #fff3b0;
+      text-shadow: 2px 2px 0 #000;
+      white-space: nowrap;
+    }
+    .hud-combo-pill {
+      background: linear-gradient(180deg, #ff9f1c, #e63946);
+      color: #fff;
+      font-weight: 900;
+      font-size: clamp(12px, 1.3vw, 17px);
+      padding: 3px 10px;
+      border-radius: 999px;
+      border: 2px solid #fff;
+      box-shadow: 0 0 12px rgba(255, 183, 3, 0.85);
+      display: none;
+      animation: comboPop 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+    .hud-combo-pill.active {
+      display: inline-block;
+    }
+    @keyframes comboPop {
+      0% { transform: scale(0.6); }
+      100% { transform: scale(1); }
+    }
   </style>
 </head>
 <body>
@@ -420,6 +455,10 @@
       </div>
     </div>
     <div class="hud-box">
+      <div class="hud-dist-badge">
+        <span id="hudDistVal">📏 0 m</span>
+        <span id="hudComboPill" class="hud-combo-pill">x2</span>
+      </div>
       <span style="font-weight:800; color:#ffd166; font-size:clamp(14px,1.5vw,20px);">ESFERAS:</span>
       <div class="db-tracker" id="dbTracker">
         <div class="db-slot" data-star="1">1★</div>
@@ -510,9 +549,15 @@
     window.addEventListener("resize", resize);
     resize();
 
-    // Trilha Sonora Oficial (Dragon Ball Z: Battle of Gods Original Soundtrack) + Sintetizador de Efeitos
+    // Trilha Sonora Oficial (Dragon Ball Z: Battle of Gods Original Soundtrack) + Sintetizador de Efeitos (Audio Design Skill)
     let soundEnabled = true;
     let audioCtx = null;
+    let masterBus = null;
+    let sfxBus = null;
+    const BASE_BGM_VOLUME = 0.55;
+    let bgmDuckFactor = 1.0;
+    let bgmDuckTarget = 1.0;
+    let bgmDuckTimer = 0;
 
     const AUDIO_BASE = window.location.pathname.endsWith("/jogo") ? "jogo/audio/" : "audio/";
     const SOUNDTRACK_LIST = [
@@ -528,8 +573,31 @@
     let currentTrackIdx = 0;
     const bgmAudio = new Audio();
     bgmAudio.preload = "auto";
-    bgmAudio.volume = 0.55;
+    bgmAudio.volume = BASE_BGM_VOLUME;
     bgmAudio.src = SOUNDTRACK_LIST[currentTrackIdx].src;
+
+    function duckMusic(dipFactor = 0.38, holdSec = 0.28) {
+      bgmDuckFactor = Math.min(bgmDuckFactor, dipFactor);
+      bgmDuckTarget = dipFactor;
+      bgmDuckTimer = Math.max(bgmDuckTimer, holdSec);
+      if (soundEnabled) {
+        bgmAudio.volume = Math.max(0.05, BASE_BGM_VOLUME * bgmDuckFactor);
+      }
+    }
+
+    function updateAudioDucking(realDt) {
+      if (bgmDuckTimer > 0) {
+        bgmDuckTimer = Math.max(0, bgmDuckTimer - realDt);
+        if (bgmDuckTimer === 0) bgmDuckTarget = 1.0;
+      }
+      if (Math.abs(bgmDuckFactor - bgmDuckTarget) > 0.005) {
+        const rate = bgmDuckTarget < bgmDuckFactor ? 18.0 : 3.2; // Ataque rápido, release suave (~350ms)
+        bgmDuckFactor += (bgmDuckTarget - bgmDuckFactor) * Math.min(1, realDt * rate);
+        if (soundEnabled) {
+          bgmAudio.volume = Math.max(0.05, Math.min(1, BASE_BGM_VOLUME * bgmDuckFactor));
+        }
+      }
+    }
 
     function updateMusicButtonLabel() {
       const btn = document.getElementById("btnMusicTrack");
@@ -561,7 +629,25 @@
     function initAudio() {
       if (!audioCtx) {
         const AC = window.AudioContext || window.webkitAudioContext;
-        if (AC) audioCtx = new AC();
+        if (AC) {
+          audioCtx = new AC();
+          // Bus Layout com Compressor/Limiter no Master para evitar clipping em explosões simultâneas
+          const limiter = audioCtx.createDynamicsCompressor();
+          limiter.threshold.setValueAtTime(-3.0, audioCtx.currentTime);
+          limiter.knee.setValueAtTime(6.0, audioCtx.currentTime);
+          limiter.ratio.setValueAtTime(12.0, audioCtx.currentTime);
+          limiter.attack.setValueAtTime(0.002, audioCtx.currentTime);
+          limiter.release.setValueAtTime(0.18, audioCtx.currentTime);
+          limiter.connect(audioCtx.destination);
+
+          masterBus = audioCtx.createGain();
+          masterBus.gain.setValueAtTime(0.92, audioCtx.currentTime);
+          masterBus.connect(limiter);
+
+          sfxBus = audioCtx.createGain();
+          sfxBus.gain.setValueAtTime(1.0, audioCtx.currentTime);
+          sfxBus.connect(masterBus);
+        }
       }
       if (audioCtx && audioCtx.state === "suspended") {
         audioCtx.resume();
@@ -569,49 +655,109 @@
       ensureBgmPlaying();
     }
 
-    function playTone(freq, type, duration, vol = 0.12, slideTo = null) {
+    // Sintetizador com variação automática de pitch/volume (Audio Design Pattern 3 - evita repetição mecânica)
+    function playTone(freq, type, duration, vol = 0.12, slideTo = null, randomize = true) {
       if (!soundEnabled || !audioCtx) return;
       try {
         const osc = audioCtx.createOscillator();
         const gain = audioCtx.createGain();
+        const pitchVar = randomize ? (0.955 + Math.random() * 0.09) : 1.0; // +/- ~1 semitom
+        const volVar = randomize ? (0.9 + Math.random() * 0.2) : 1.0;
+        const startFreq = freq * pitchVar;
         osc.type = type;
-        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+        osc.frequency.setValueAtTime(startFreq, audioCtx.currentTime);
         if (slideTo) {
-          osc.frequency.exponentialRampToValueAtTime(slideTo, audioCtx.currentTime + duration);
+          osc.frequency.exponentialRampToValueAtTime(Math.max(20, slideTo * pitchVar), audioCtx.currentTime + duration);
         }
-        gain.gain.setValueAtTime(vol, audioCtx.currentTime);
+        gain.gain.setValueAtTime(vol * volVar, audioCtx.currentTime);
         gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
         osc.connect(gain);
-        gain.connect(audioCtx.destination);
+        gain.connect(sfxBus || audioCtx.destination);
         osc.start();
         osc.stop(audioCtx.currentTime + duration);
       } catch (e) {}
     }
 
     function sfxMove(up) {
-      playTone(up ? 340 : 280, "sine", 0.11, 0.07, up ? 520 : 210);
+      playTone(up ? 340 : 280, "sine", 0.11, 0.065, up ? 520 : 210, true);
     }
     function sfxDragonBall() {
-      playTone(587.33, "triangle", 0.12, 0.16, 880);
-      setTimeout(() => playTone(880, "triangle", 0.22, 0.18, 1174.66), 90);
+      playTone(587.33, "triangle", 0.12, 0.16, 880, false);
+      setTimeout(() => playTone(880, "triangle", 0.22, 0.18, 1174.66, false), 85);
     }
     function sfxShenlong() {
+      duckMusic(0.28, 1.1);
       const notes = [523.25, 659.25, 783.99, 1046.5, 1318.5];
-      notes.forEach((n, i) => setTimeout(() => playTone(n, "sawtooth", 0.28, 0.14), i * 110));
+      notes.forEach((n, i) => setTimeout(() => playTone(n, "sawtooth", 0.30, 0.15, null, false), i * 105));
     }
     function sfxHit() {
-      playTone(160, "sawtooth", 0.3, 0.18, 55);
+      duckMusic(0.45, 0.25);
+      playTone(165, "sawtooth", 0.30, 0.19, 52, true);
+      playTone(92, "square", 0.22, 0.14, 38, true);
     }
     function sfxKamehameha() {
-      playTone(260, "sine", 0.12, 0.16, 780);
+      duckMusic(0.42, 0.36);
+      playTone(260, "sine", 0.12, 0.16, 780, true);
       setTimeout(() => {
-        playTone(620, "sawtooth", 0.38, 0.18, 190);
-        playTone(940, "triangle", 0.35, 0.15, 320);
-      }, 65);
+        playTone(620, "sawtooth", 0.38, 0.18, 190, true);
+        playTone(940, "triangle", 0.35, 0.15, 320, true);
+      }, 60);
     }
     function sfxRockShatter() {
-      playTone(140, "sawtooth", 0.26, 0.22, 42);
-      setTimeout(() => playTone(95, "square", 0.22, 0.16, 35), 55);
+      duckMusic(0.48, 0.22);
+      playTone(145, "sawtooth", 0.26, 0.22, 42, true);
+      setTimeout(() => playTone(98, "square", 0.22, 0.16, 35, true), 50);
+    }
+
+    // Sistema de Save Versionado e Atômico com Backup (.bak) e Migração (Save Systems Skill)
+    const SAVE_VERSION = 1;
+    const SAVE_KEY = "nuvem_voadora_save_v1";
+    const SAVE_BAK_KEY = "nuvem_voadora_save_v1.bak";
+    const SAVE_MIGRATIONS = {};
+
+    function saveGameProgress() {
+      const payload = {
+        version: SAVE_VERSION,
+        bestScore: Math.max(0, Math.floor(bestScore)),
+        mode: currentMode === "father" ? "father" : "son",
+        soundEnabled: Boolean(soundEnabled)
+      };
+      try {
+        const prev = localStorage.getItem(SAVE_KEY);
+        if (prev) {
+          localStorage.setItem(SAVE_BAK_KEY, prev);
+        }
+        localStorage.setItem(SAVE_KEY, JSON.stringify(payload));
+      } catch (e) {}
+    }
+
+    function loadGameProgress() {
+      const keys = [SAVE_KEY, SAVE_BAK_KEY];
+      for (let i = 0; i < keys.length; i++) {
+        try {
+          const raw = localStorage.getItem(keys[i]);
+          if (!raw) continue;
+          let data = JSON.parse(raw);
+          if (!data || typeof data !== "object") continue;
+          let v = typeof data.version === "number" ? Math.floor(data.version) : 1;
+          if (v > SAVE_VERSION) continue; // Recusa save de versão futura incompatível
+          while (v < SAVE_VERSION && SAVE_MIGRATIONS[v]) {
+            data = SAVE_MIGRATIONS[v](data);
+            v++;
+            data.version = v;
+          }
+          if (typeof data.bestScore === "number" && data.bestScore >= 0) {
+            bestScore = Math.floor(data.bestScore);
+          }
+          if (data.mode === "son" || data.mode === "father") {
+            currentMode = data.mode;
+          }
+          if (typeof data.soundEnabled === "boolean") {
+            soundEnabled = data.soundEnabled;
+          }
+          return;
+        } catch (e) {}
+      }
     }
 
     // Estado do Jogo
@@ -631,8 +777,45 @@
     let invincibleTimer = 0;
     let flashTimer = 0;
     let shenlongBannerTimer = 0;
+    let comboCount = 0;
+    let comboTimer = 0;
+    let gameClock = 0;
 
-    // Jogador (Nuvem Voadora)
+    // Game Feel (Juice): Trauma Screen Shake, Real-time Hit-Stop, Squash & Stretch (Game Feel Skill)
+    const cameraFeel = {
+      trauma: 0,
+      decay: 1.35,
+      maxOffsetX: 15,
+      maxOffsetY: 11,
+      maxRoll: 0.032,
+      time: 0,
+      offsetX: 0,
+      offsetY: 0,
+      roll: 0
+    };
+    let hitStopId = 0;
+    let hitStopTimer = 0;
+    let timeScale = 1.0;
+
+    function addTrauma(amount) {
+      cameraFeel.trauma = Math.min(1.0, Math.max(0.0, cameraFeel.trauma + amount));
+    }
+
+    function triggerHitStop(duration = 0.055, slow = 0.08) {
+      // Não empilha hit-stop repetido dentro de uma parada ativa, mas preserva a maior duração em tempo real
+      hitStopId++;
+      timeScale = slow;
+      hitStopTimer = Math.max(hitStopTimer, duration);
+    }
+
+    function easeOutBack(k) {
+      const c1 = 1.70158;
+      const c3 = c1 + 1.0;
+      const m = k - 1.0;
+      return 1.0 + c3 * m * m * m + c1 * m * m;
+    }
+
+    // Jogador (Nuvem Voadora) com Squash/Stretch e Recoil visual
     const player = {
       x: 240,
       y: H * 0.5,
@@ -640,8 +823,59 @@
       vy: 0,
       tilt: 0,
       radius: 54,
+      scaleX: 1.0,
+      scaleY: 1.0,
+      popStartX: 1.0,
+      popStartY: 1.0,
+      popElapsed: 0,
+      popDuration: 0,
+      recoilX: 0,
+      flashWhiteTimer: 0,
       trail: []
     };
+
+    function triggerPlayerPop(squashX, squashY, duration = 0.20, recoilPx = 0) {
+      player.popStartX = squashX;
+      player.popStartY = squashY;
+      player.scaleX = squashX;
+      player.scaleY = squashY;
+      player.popElapsed = 0;
+      player.popDuration = duration;
+      if (recoilPx !== 0) {
+        player.recoilX = Math.max(-28, Math.min(28, player.recoilX + recoilPx));
+      }
+    }
+
+    // Input Systems Skill: Action Buffer para não perder cliques de Kamehameha perto do fim do cooldown + Radial Deadzone
+    const actionBuffer = {
+      pressedAt: {},
+      press(action, nowClock) {
+        this.pressedAt[action] = nowClock;
+      },
+      consume(action, nowClock, windowSec = 0.16) {
+        if (this.pressedAt[action] === undefined) return false;
+        if (nowClock - this.pressedAt[action] > windowSec) {
+          delete this.pressedAt[action];
+          return false;
+        }
+        delete this.pressedAt[action];
+        return true;
+      },
+      clear() {
+        this.pressedAt = {};
+      }
+    };
+
+    function applyRadialDeadzone(ax, ay, dead = 0.20, curve = 1.15) {
+      const mag = Math.hypot(ax, ay);
+      if (mag <= dead) return { x: 0, y: 0 };
+      const scaled = Math.min(1.0, (mag - dead) / (1.0 - dead));
+      const curved = Math.pow(scaled, curve);
+      return { x: (ax / mag) * curved, y: (ay / mag) * curved };
+    }
+    let prevGamepadFirePressed = false;
+
+    loadGameProgress();
 
     // Controles (Suporte Nativo a Controle Remoto de TV Samsung UN43DU8000GXZD Tizen, Ponteiro da TV, Canal CH, Teclado e Touch)
     let moveUpHeld = false;
@@ -695,15 +929,18 @@
       }
     }
 
-    function selectMode(m) {
-      initAudio();
+    function selectMode(m, skipAudio = false) {
+      if (!skipAudio) initAudio();
       currentMode = m;
       document.querySelectorAll(".mode-card").forEach(el => {
         el.classList.toggle("selected", el.getAttribute("data-mode") === m);
       });
       const switchBtn = document.getElementById("btnSwitchMode");
       if (switchBtn) switchBtn.textContent = MODE_LABELS[m];
+      saveGameProgress();
     }
+    // Aplica o modo salvo no carregamento inicial sem forçar áudio antes da interação
+    selectMode(currentMode, true);
 
     const btnSwitchModeEl = document.getElementById("btnSwitchMode");
     if (btnSwitchModeEl) {
@@ -731,6 +968,7 @@
         } else {
           bgmAudio.pause();
         }
+        saveGameProgress();
       });
     }
 
@@ -738,6 +976,7 @@
       initAudio();
       const step = H * 0.11 * stepMultiplier;
       player.targetY = Math.max(H * 0.14, player.targetY - step);
+      triggerPlayerPop(0.94, 1.07, 0.14, 0);
       flashDirectionButton(true);
       sfxMove(true);
     }
@@ -746,6 +985,7 @@
       initAudio();
       const step = H * 0.11 * stepMultiplier;
       player.targetY = Math.min(H * 0.85, player.targetY + step);
+      triggerPlayerPop(1.07, 0.94, 0.14, 0);
       flashDirectionButton(false);
       sfxMove(false);
     }
@@ -1012,55 +1252,122 @@
       });
     }
 
-    // Objetos do Cenário: Montanhas, Montanhas de Pedra, Kamehameha, Esferas do Dragão e Partículas
+    // Objetos do Cenário: Montanhas, Montanhas de Pedra, Kamehameha, Esferas do Dragão, Partículas e Pop-ups (Performance Optimization: Object Pooling)
     let mountains = [];
     let dragonBalls = [];
     let bgClouds = [];
     let floatingParticles = [];
     let kamehamehaBeams = [];
     let rockDebris = [];
+    let rockDebrisPool = [];
+    let floatingTexts = [];
+    let floatingTextPool = [];
     let kameCooldown = 0;
     let mountainSpawnCount = 0;
     let distanceAccumulator = 0;
 
-    function fireKamehameha() {
-      initAudio();
-      if (gameState !== "playing") return;
-      if (kameCooldown > 0) return;
-      kameCooldown = 0.38;
+    // Cache de Elementos DOM (Performance Optimization & Game UI/UX: evita queries por frame)
+    const domCache = {
+      scoreVal: document.getElementById("scoreVal"),
+      livesVal: document.getElementById("livesVal"),
+      hpDepleteBar: document.getElementById("hpDepleteBar"),
+      hpNumVal: document.getElementById("hpNumVal"),
+      lvlVal: document.getElementById("lvlVal"),
+      kiDepleteBar: document.getElementById("kiDepleteBar"),
+      kiNumVal: document.getElementById("kiNumVal"),
+      thomasHudFrame: document.getElementById("thomasHudFrame"),
+      hudDistVal: document.getElementById("hudDistVal"),
+      hudComboPill: document.getElementById("hudComboPill"),
+      btnKame: document.getElementById("btnKame"),
+      btnStart: document.getElementById("btnStart"),
+      overlay: document.getElementById("overlay"),
+      menuTitle: document.getElementById("menuTitle"),
+      menuSubtitle: document.getElementById("menuSubtitle"),
+      dbSlots: Array.from(document.querySelectorAll("#dbTracker .db-slot"))
+    };
 
-      const btnK = document.getElementById("btnKame");
-      if (btnK) {
-        btnK.classList.add("active-key");
-        setTimeout(() => btnK.classList.remove("active-key"), 240);
+    // Estado anterior do HUD para atualizar o DOM apenas quando valores mudam (Event-Driven HUD - Game UI/UX Skill)
+    const hudLastState = {
+      distInt: -1,
+      lives: -1,
+      starsMask: -1,
+      ssjActive: null,
+      combo: -1
+    };
+
+    function removeAtSwap(arr, idx) {
+      const last = arr.length - 1;
+      if (idx !== last) {
+        arr[idx] = arr[last];
+      }
+      arr.pop();
+    }
+
+    function spawnFloatingText(x, y, text, color = "#ffd166", scale = 1.0) {
+      if (floatingTexts.length >= 24) return;
+      const item = floatingTextPool.length > 0 ? floatingTextPool.pop() : {};
+      item.x = x + (Math.random() - 0.5) * 26; // Fan-out horizontal (Game Feel Skill)
+      item.y = y;
+      item.vx = (Math.random() - 0.5) * 45;
+      item.vy = -95 - Math.random() * 35;
+      item.text = text;
+      item.color = color;
+      item.scale = scale;
+      item.life = 0.85;
+      item.maxLife = 0.85;
+      floatingTexts.push(item);
+    }
+
+    function executeKamehamehaNow() {
+      kameCooldown = 0.36;
+
+      if (domCache.btnKame) {
+        domCache.btnKame.classList.add("active-key");
+        setTimeout(() => domCache.btnKame.classList.remove("active-key"), 240);
       }
 
       sfxKamehameha();
+      // Game Feel: Squash & Stretch no disparo + leve recuo (recoil) e trauma sutil na câmera
+      triggerPlayerPop(1.26, 0.78, 0.22, -16);
+      addTrauma(0.18);
+
       kamehamehaBeams.push({
         x: player.x + 48,
         y: player.y + 4,
         timer: 0.48,
         maxTimer: 0.48,
-        height: superSaiyanTimer > 0 ? 115 : 88
+        height: superSaiyanTimer > 0 ? 118 : 90
       });
+    }
+
+    function fireKamehameha() {
+      initAudio();
+      if (gameState !== "playing") return;
+      if (kameCooldown > 0) {
+        // Input Systems Skill: armazena no buffer se o jogador apertou pouco antes do cooldown acabar!
+        actionBuffer.press("kame", gameClock);
+        return;
+      }
+      executeKamehamehaNow();
     }
 
     function spawnRockExplosion(cx, cy, count = 24) {
       const colors = ["#4a5568", "#718096", "#2d3748", "#a0aec0", "#00b4d8", "#ffd166"];
       for (let i = 0; i < count; i++) {
+        if (rockDebris.length >= 140) break; // Limite de orçamento de partículas (Performance Optimization)
         const angle = Math.random() * Math.PI * 2;
         const spd = 120 + Math.random() * 440;
-        rockDebris.push({
-          x: cx + (Math.random() - 0.5) * 70,
-          y: cy + (Math.random() - 0.5) * 90,
-          vx: Math.cos(angle) * spd + 80,
-          vy: Math.sin(angle) * spd - 60,
-          size: 8 + Math.random() * 18,
-          rot: Math.random() * Math.PI * 2,
-          vrot: (Math.random() - 0.5) * 10,
-          color: colors[Math.floor(Math.random() * colors.length)],
-          life: 0.55 + Math.random() * 0.35
-        });
+        const d = rockDebrisPool.length > 0 ? rockDebrisPool.pop() : {};
+        d.x = cx + (Math.random() - 0.5) * 70;
+        d.y = cy + (Math.random() - 0.5) * 90;
+        d.vx = Math.cos(angle) * spd + 80;
+        d.vy = Math.sin(angle) * spd - 60;
+        d.size = 8 + Math.random() * 18;
+        d.rot = Math.random() * Math.PI * 2;
+        d.vrot = (Math.random() - 0.5) * 10;
+        d.color = colors[Math.floor(Math.random() * colors.length)];
+        d.life = 0.55 + Math.random() * 0.35;
+        rockDebris.push(d);
       }
     }
 
@@ -1077,59 +1384,93 @@
     }
     initScenery();
 
-    function updateHud() {
-      const scoreEl = document.getElementById("scoreVal");
-      if (scoreEl) {
-        scoreEl.textContent = Math.floor(score);
-      }
-      const livesEl = document.getElementById("livesVal");
-      if (livesEl) {
-        livesEl.textContent = "💚".repeat(Math.max(0, lives)) + "🖤".repeat(Math.max(0, maxLives - lives));
+    function updateHud(force = false) {
+      const distInt = Math.floor(score);
+      const ssjActive = superSaiyanTimer > 0;
+      let starsMask = 0;
+      collectedStars.forEach(s => { starsMask |= (1 << s); });
+
+      if (
+        !force &&
+        hudLastState.distInt === distInt &&
+        hudLastState.lives === lives &&
+        hudLastState.starsMask === starsMask &&
+        hudLastState.ssjActive === ssjActive &&
+        hudLastState.combo === comboCount
+      ) {
+        return;
       }
 
-      // Atualiza a barra de Vida (HP = base 7078 da photo_69.jpg)
-      const hpRatio = Math.max(0, Math.min(1, lives / maxLives));
-      const hpValue = Math.round(7078 * hpRatio);
-      const hpDepleteEl = document.getElementById("hpDepleteBar");
-      if (hpDepleteEl) {
-        hpDepleteEl.style.width = `${(1 - hpRatio) * 100}%`;
-      }
-      const hpNumEl = document.getElementById("hpNumVal");
-      if (hpNumEl) {
-        hpNumEl.textContent = `💚 ${hpValue}`;
-      }
-
-      // Atualiza Level (base Lvl 3 da photo_69.jpg + evolui a cada 250m) e Poder (base 117 + Esferas/Ki)
-      const currentLvl = 3 + Math.floor(score / 250);
-      const lvlEl = document.getElementById("lvlVal");
-      if (lvlEl) {
-        lvlEl.textContent = `⚡ Lvl ${currentLvl}`;
+      if (force || hudLastState.distInt !== distInt) {
+        if (domCache.scoreVal) domCache.scoreVal.textContent = distInt;
+        if (domCache.hudDistVal) {
+          domCache.hudDistVal.textContent = bestScore > 0
+            ? `📏 ${distInt} m  •  🏆 ${ Math.max(bestScore, distInt) } m`
+            : `📏 ${distInt} m`;
+        }
+        const currentLvl = 3 + Math.floor(distInt / 250);
+        if (domCache.lvlVal) domCache.lvlVal.textContent = `⚡ Lvl ${currentLvl}`;
       }
 
-      const kiRatio = superSaiyanTimer > 0
-        ? 1
-        : Math.min(1, 0.35 + (collectedStars.size / 7) * 0.65);
-      const kiDepleteEl = document.getElementById("kiDepleteBar");
-      if (kiDepleteEl) {
-        kiDepleteEl.style.width = `${(1 - kiRatio) * 100}%`;
-      }
-      const kiValue = superSaiyanTimer > 0
-        ? 999
-        : (117 + collectedStars.size * 25 + Math.floor(score * 0.2));
-      const kiNumEl = document.getElementById("kiNumVal");
-      if (kiNumEl) {
-        kiNumEl.textContent = superSaiyanTimer > 0 ? `🔥 ${kiValue} SSJ!` : `💠 ${kiValue}`;
+      if (force || hudLastState.combo !== comboCount) {
+        if (domCache.hudComboPill) {
+          if (comboCount >= 2) {
+            domCache.hudComboPill.textContent = `🔥 COMBO x${comboCount}`;
+            domCache.hudComboPill.classList.add("active");
+          } else {
+            domCache.hudComboPill.classList.remove("active");
+          }
+        }
       }
 
-      const hudFrame = document.getElementById("thomasHudFrame");
-      if (hudFrame) {
-        hudFrame.classList.toggle("ssj-active", superSaiyanTimer > 0);
+      if (force || hudLastState.lives !== lives) {
+        if (domCache.livesVal) {
+          domCache.livesVal.textContent = "💚".repeat(Math.max(0, lives)) + "🖤".repeat(Math.max(0, maxLives - lives));
+        }
+        const hpRatio = Math.max(0, Math.min(1, lives / maxLives));
+        const hpValue = Math.round(7078 * hpRatio);
+        if (domCache.hpDepleteBar) {
+          domCache.hpDepleteBar.style.width = `${(1 - hpRatio) * 100}%`;
+        }
+        if (domCache.hpNumVal) {
+          domCache.hpNumVal.textContent = `💚 ${hpValue}`;
+        }
       }
 
-      document.querySelectorAll("#dbTracker .db-slot").forEach(slot => {
-        const star = parseInt(slot.getAttribute("data-star"), 10);
-        slot.classList.toggle("collected", collectedStars.has(star));
-      });
+      if (force || hudLastState.starsMask !== starsMask || hudLastState.ssjActive !== ssjActive || hudLastState.distInt !== distInt) {
+        const kiRatio = ssjActive
+          ? 1
+          : Math.min(1, 0.35 + (collectedStars.size / 7) * 0.65);
+        if (domCache.kiDepleteBar) {
+          domCache.kiDepleteBar.style.width = `${(1 - kiRatio) * 100}%`;
+        }
+        const kiValue = ssjActive
+          ? 999
+          : (117 + collectedStars.size * 25 + Math.floor(distInt * 0.2));
+        if (domCache.kiNumVal) {
+          domCache.kiNumVal.textContent = ssjActive ? `🔥 ${kiValue} SSJ!` : `💠 ${kiValue}`;
+        }
+      }
+
+      if (force || hudLastState.ssjActive !== ssjActive) {
+        if (domCache.thomasHudFrame) {
+          domCache.thomasHudFrame.classList.toggle("ssj-active", ssjActive);
+        }
+      }
+
+      if (force || hudLastState.starsMask !== starsMask) {
+        for (let i = 0; i < domCache.dbSlots.length; i++) {
+          const slot = domCache.dbSlots[i];
+          const star = i + 1;
+          slot.classList.toggle("collected", collectedStars.has(star));
+        }
+      }
+
+      hudLastState.distInt = distInt;
+      hudLastState.lives = lives;
+      hudLastState.starsMask = starsMask;
+      hudLastState.ssjActive = ssjActive;
+      hudLastState.combo = comboCount;
     }
 
     function spawnMountainPair(startX) {
@@ -1161,7 +1502,7 @@
         seed: Math.random() * 100
       });
 
-      // Coloca uma Esfera do Dragão ou Semente dos Deuses no caminho!
+      // Coloca uma Esfera do Dragão no caminho!
       const missingStars = [1, 2, 3, 4, 5, 6, 7].filter(s => !collectedStars.has(s));
       const starNum = missingStars.length > 0
         ? missingStars[Math.floor(Math.random() * missingStars.length)]
@@ -1185,6 +1526,7 @@
       moveDownHeld = false;
       hoverUpHeld = false;
       hoverDownHeld = false;
+      actionBuffer.clear();
       score = 0;
       lives = maxLives;
       collectedStars.clear();
@@ -1192,36 +1534,66 @@
       invincibleTimer = 0;
       shenlongBannerTimer = 0;
       kameCooldown = 0;
+      comboCount = 0;
+      comboTimer = 0;
       mountainSpawnCount = 0;
+      cameraFeel.trauma = 0;
+      cameraFeel.offsetX = 0;
+      cameraFeel.offsetY = 0;
+      cameraFeel.roll = 0;
+      hitStopTimer = 0;
+      timeScale = 1.0;
+
       player.x = Math.max(170, W * 0.22);
       player.y = H * 0.5;
       player.targetY = H * 0.5;
       player.tilt = 0;
+      player.scaleX = 1.0;
+      player.scaleY = 1.0;
+      player.popDuration = 0;
+      player.recoilX = 0;
+      player.flashWhiteTimer = 0;
       player.trail = [];
       mountains = [];
       dragonBalls = [];
       floatingParticles = [];
       kamehamehaBeams = [];
-      rockDebris = [];
+      while (rockDebris.length > 0) rockDebrisPool.push(rockDebris.pop());
+      while (floatingTexts.length > 0) floatingTextPool.push(floatingTexts.pop());
 
       const spacing = Math.max(460, W * 0.38);
       for (let i = 1; i <= 4; i++) {
         spawnMountainPair(W * 0.65 + i * spacing);
       }
 
-      updateHud();
-      document.getElementById("overlay").classList.add("hidden");
+      updateHud(true);
+      if (domCache.overlay) domCache.overlay.classList.add("hidden");
       keepCanvasFocused();
     }
 
     function gameOver() {
       gameState = "gameover";
+      actionBuffer.clear();
+      hitStopTimer = 0;
+      timeScale = 1.0;
       bestScore = Math.max(bestScore, Math.floor(score));
-      document.getElementById("menuTitle").textContent = "Fim da Corrida nas Montanhas!";
-      document.getElementById("menuSubtitle").textContent =
-        `Distância percorrida: ${Math.floor(score)} m  •  Recorde: ${bestScore} m`;
-      document.getElementById("btnStart").textContent = "🔄 JOGAR NOVAMENTE (OK / ENTER)";
-      document.getElementById("overlay").classList.remove("hidden");
+      saveGameProgress();
+      updateHud(true);
+      if (domCache.menuTitle) domCache.menuTitle.textContent = "Fim da Corrida nas Montanhas!";
+      if (domCache.menuSubtitle) {
+        domCache.menuSubtitle.textContent =
+          `Distância percorrida: ${Math.floor(score)} m  •  Recorde: ${bestScore} m`;
+      }
+      if (domCache.btnStart) {
+        domCache.btnStart.textContent = "🔄 JOGAR NOVAMENTE (OK / ENTER)";
+      }
+      if (domCache.overlay) {
+        domCache.overlay.classList.remove("hidden");
+      }
+      // Game UI/UX Skill: foca o botão principal ao abrir o menu para navegação imediata no controle/gamepad
+      try {
+        if (domCache.btnStart) domCache.btnStart.focus({ preventScroll: true });
+      } catch (e) {}
     }
 
     // Desenho do Cenário estilo Dragon Ball (Céu, Sol, Capsule Corp., Montanhas Paozu)
@@ -1252,7 +1624,8 @@
       ctx.fill();
 
       // Nuvens fofas estilo Anime
-      bgClouds.forEach(c => {
+      for (let i = 0; i < bgClouds.length; i++) {
+        const c = bgClouds[i];
         ctx.save();
         ctx.translate(c.x, c.y);
         ctx.scale(c.scale, c.scale);
@@ -1264,9 +1637,9 @@
         ctx.arc(36, 14, 38, 0, Math.PI * 2);
         ctx.fill();
         ctx.restore();
-      });
+      }
 
-      // Cordilheira distante e Cúpula da Capsule Corp. no horizonte
+      // Cordilheira distante no horizonte
       ctx.fillStyle = "rgba(68, 114, 168, 0.45)";
       ctx.beginPath();
       ctx.moveTo(0, H);
@@ -1277,6 +1650,22 @@
       ctx.lineTo(W, H);
       ctx.closePath();
       ctx.fill();
+
+      // Linhas de velocidade douradas quando o modo Super Saiyajin está ativo!
+      if (superSaiyanTimer > 0) {
+        ctx.save();
+        ctx.strokeStyle = "rgba(255, 243, 176, 0.42)";
+        ctx.lineWidth = 3;
+        for (let s = 0; s < 10; s++) {
+          const sy = ((s * 97 + Math.floor(time * 0.4)) % Math.max(1, Math.floor(H * 0.85))) + H * 0.08;
+          const sx = W - ((time * 1.45 + s * 230) % (W + 320));
+          ctx.beginPath();
+          ctx.moveTo(sx, sy);
+          ctx.lineTo(sx + 135, sy);
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
     }
 
     // Desenha uma Montanha Estilo Dragon Ball (Monte Paozu ou Montanha de Pedras Maciça)
@@ -1432,7 +1821,7 @@
       }
     }
 
-    // Desenha os Feixes de Energia KAMEHAMEHA e os Fragmentos de Pedra Explodindo
+    // Desenha os Feixes de Energia KAMEHAMEHA, Fragmentos de Pedra e Pop-ups de Pontuação
     function drawKamehamehaAndDebris() {
       // Feixes ativos de Kamehameha
       for (let i = 0; i < kamehamehaBeams.length; i++) {
@@ -1491,6 +1880,28 @@
         ctx.stroke();
         ctx.restore();
       }
+
+      // Textos flutuantes de pontuação / combo (Game Feel: Number & Text Pops com EaseOutBack)
+      for (let i = 0; i < floatingTexts.length; i++) {
+        const ft = floatingTexts[i];
+        const progress = 1.0 - (ft.life / ft.maxLife);
+        const popScale = progress < 0.28 ? easeOutBack(progress / 0.28) * ft.scale : ft.scale;
+        const alpha = progress > 0.65 ? Math.max(0, (1.0 - progress) / 0.35) : 1.0;
+
+        ctx.save();
+        ctx.translate(ft.x, ft.y);
+        ctx.scale(popScale, popScale);
+        ctx.globalAlpha = alpha;
+        ctx.font = "900 22px sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.lineWidth = 5;
+        ctx.strokeStyle = "rgba(5, 12, 28, 0.92)";
+        ctx.strokeText(ft.text, 0, 0);
+        ctx.fillStyle = ft.color;
+        ctx.fillText(ft.text, 0, 0);
+        ctx.restore();
+      }
     }
 
     // Desenha uma Esfera do Dragão brilhante com suas estrelas vermelhas
@@ -1534,7 +1945,7 @@
       ctx.restore();
     }
 
-    // Desenha os personagens (Pai e Filho) em suas Nuvens Voadoras Kinto'un
+    // Desenha os personagens (Pai e Filho) em suas Nuvens Voadoras Kinto'un com Squash & Stretch e Recoil
     function drawPlayers(time) {
       // Rastro dourado ondulante da Nuvem Voadora (Kinto'un)
       for (let i = 0; i < player.trail.length; i++) {
@@ -1557,8 +1968,9 @@
 
       const drawSingleCharacter = (img, cx, cy, scale, label) => {
         ctx.save();
-        ctx.translate(cx, cy);
+        ctx.translate(cx + player.recoilX, cy);
         ctx.rotate(player.tilt);
+        ctx.scale(player.scaleX, player.scaleY);
 
         // Aura Dourada Kinto'un / Super Saiyajin
         const auraRadius = 82 * scale;
@@ -1592,6 +2004,14 @@
         const spriteH = 165 * scale;
         const spriteW = img.width ? (img.width / img.height) * spriteH : 140 * scale;
         ctx.drawImage(img, -spriteW / 2, -spriteH / 2 - 4 * scale, spriteW, spriteH);
+
+        // Flash de brilho de impacto no personagem (1-2 frames) sem piscar a tela inteira (Game Feel recipe 3)
+        if (player.flashWhiteTimer > 0) {
+          ctx.fillStyle = "rgba(255, 255, 255, 0.55)";
+          ctx.beginPath();
+          ctx.arc(0, 4, 58 * scale, 0, Math.PI * 2);
+          ctx.fill();
+        }
 
         // Etiqueta com nome acima
         if (label) {
@@ -1629,49 +2049,136 @@
     // Loop Principal de Atualização e Renderização
     let lastTime = performance.now();
     function loop(now) {
-      const dt = Math.min(0.05, (now - lastTime) / 1000);
+      const realDt = Math.min(0.05, Math.max(0.0001, (now - lastTime) / 1000));
       lastTime = now;
+
+      // Atualiza ducking da trilha sonora em tempo real (Audio Design Skill)
+      updateAudioDucking(realDt);
+
+      // Atualiza Hit-Stop em tempo real para nunca travar (Game Feel Pattern 2)
+      if (hitStopTimer > 0) {
+        hitStopTimer = Math.max(0, hitStopTimer - realDt);
+        if (hitStopTimer === 0) {
+          timeScale = 1.0;
+        }
+      }
+      const dt = realDt * timeScale;
+      if (gameState === "playing") {
+        gameClock += dt;
+      }
+
+      // Atualiza Screen Shake baseado em Trauma em tempo real (Game Feel Pattern 1: trauma^2 + senos incomensuráveis)
+      if (cameraFeel.trauma > 0) {
+        cameraFeel.trauma = Math.max(0, cameraFeel.trauma - cameraFeel.decay * realDt);
+        const shake = cameraFeel.trauma * cameraFeel.trauma;
+        cameraFeel.time += realDt * 28.0;
+        const t = cameraFeel.time;
+        cameraFeel.offsetX = cameraFeel.maxOffsetX * shake * (0.6 * Math.sin(t * 1.7) + 0.4 * Math.sin(t * 3.1));
+        cameraFeel.offsetY = cameraFeel.maxOffsetY * shake * (0.6 * Math.sin(t * 2.3) + 0.4 * Math.sin(t * 4.3));
+        cameraFeel.roll = cameraFeel.maxRoll * shake * Math.sin(t * 1.3);
+        if (cameraFeel.trauma === 0) {
+          cameraFeel.offsetX = 0;
+          cameraFeel.offsetY = 0;
+          cameraFeel.roll = 0;
+        }
+      }
+
+      // Atualiza animação Squash & Stretch e Recoil do jogador em tempo real
+      if (player.popDuration > 0) {
+        player.popElapsed += realDt;
+        if (player.popElapsed >= player.popDuration) {
+          player.scaleX = 1.0;
+          player.scaleY = 1.0;
+          player.popDuration = 0;
+        } else {
+          const ease = easeOutBack(player.popElapsed / player.popDuration);
+          player.scaleX = player.popStartX + (1.0 - player.popStartX) * ease;
+          player.scaleY = player.popStartY + (1.0 - player.popStartY) * ease;
+        }
+      }
+      if (Math.abs(player.recoilX) > 0.05) {
+        player.recoilX *= Math.pow(0.001, realDt);
+      } else {
+        player.recoilX = 0;
+      }
+      if (player.flashWhiteTimer > 0) {
+        player.flashWhiteTimer = Math.max(0, player.flashWhiteTimer - realDt);
+      }
+
+      ctx.save();
+      if (cameraFeel.offsetX !== 0 || cameraFeel.offsetY !== 0 || cameraFeel.roll !== 0) {
+        ctx.translate(W * 0.5 + cameraFeel.offsetX, H * 0.5 + cameraFeel.offsetY);
+        ctx.rotate(cameraFeel.roll);
+        ctx.translate(-W * 0.5, -H * 0.5);
+      }
 
       drawBackground(now);
 
       // Anima nuvens de fundo
-      bgClouds.forEach(c => {
-        c.x -= c.speed * (gameState === "playing" ? 1.8 : 0.7);
+      for (let i = 0; i < bgClouds.length; i++) {
+        const c = bgClouds[i];
+        c.x -= c.speed * (gameState === "playing" ? 1.8 : 0.7) * (dt / 0.01667);
         if (c.x < -140) {
           c.x = W + 120;
           c.y = H * (0.08 + Math.random() * 0.55);
         }
-      });
+      }
+
+      // Leitura de Gamepad com Radial Deadzone e Detecção de Borda para tiro/start (Input Systems Skill)
+      let gpAxisY = 0;
+      let gpFireEdge = false;
+      if (navigator.getGamepads) {
+        try {
+          const pads = navigator.getGamepads();
+          let anyFireHeld = false;
+          for (let p = 0; p < pads.length; p++) {
+            const pad = pads[p];
+            if (!pad) continue;
+            if (pad.buttons[12] && pad.buttons[12].pressed) gpAxisY = -1;
+            if (pad.buttons[13] && pad.buttons[13].pressed) gpAxisY = 1;
+            if (pad.axes && pad.axes.length >= 2) {
+              const dz = applyRadialDeadzone(pad.axes[0] || 0, pad.axes[1] || 0, 0.20, 1.15);
+              if (Math.abs(dz.y) > Math.abs(gpAxisY)) gpAxisY = dz.y;
+            }
+            const fireBtn =
+              (pad.buttons[0] && pad.buttons[0].pressed) ||
+              (pad.buttons[1] && pad.buttons[1].pressed) ||
+              (pad.buttons[2] && pad.buttons[2].pressed) ||
+              (pad.buttons[5] && pad.buttons[5].pressed) ||
+              (pad.buttons[7] && pad.buttons[7].pressed);
+            if (fireBtn) anyFireHeld = true;
+          }
+          gpFireEdge = anyFireHeld && !prevGamepadFirePressed;
+          prevGamepadFirePressed = anyFireHeld;
+        } catch (e) {}
+      }
+
+      if (gameState !== "playing" && gpFireEdge) {
+        startGame();
+      }
 
       if (gameState === "playing") {
         const speed = (superSaiyanTimer > 0 ? 420 : 285) + Math.min(140, score * 0.15);
 
         // Movimento contínuo se segurar o botão CIMA ou BAIXO no controle ou encostar o ponteiro no botão
         const holdSpeed = H * 0.62;
-        let gpUp = false;
-        let gpDown = false;
-        if (navigator.getGamepads) {
-          try {
-            const pads = navigator.getGamepads();
-            for (let p = 0; p < pads.length; p++) {
-              const pad = pads[p];
-              if (!pad) continue;
-              if ((pad.buttons[12] && pad.buttons[12].pressed) || (pad.axes[1] && pad.axes[1] < -0.35)) gpUp = true;
-              if ((pad.buttons[13] && pad.buttons[13].pressed) || (pad.axes[1] && pad.axes[1] > 0.35)) gpDown = true;
-            }
-          } catch (e) {}
-        }
 
         // Assistência contínua quando o ponteiro da TV está encostado nas bordas superior/inferior da tela
         const pointerActiveRecently = (now - lastPointerMoveTime) < 1200 && lastPointerY !== null;
         const edgeUp = pointerActiveRecently && lastPointerY < H * 0.12;
         const edgeDown = pointerActiveRecently && lastPointerY > H * 0.88;
 
-        if (moveUpHeld || hoverUpHeld || gpUp || edgeUp) {
+        if (moveUpHeld || hoverUpHeld || edgeUp) {
           player.targetY = Math.max(H * 0.14, player.targetY - holdSpeed * dt);
         }
-        if (moveDownHeld || hoverDownHeld || gpDown || edgeDown) {
+        if (moveDownHeld || hoverDownHeld || edgeDown) {
           player.targetY = Math.min(H * 0.85, player.targetY + holdSpeed * dt);
+        }
+        if (Math.abs(gpAxisY) > 0.01) {
+          player.targetY = Math.max(H * 0.14, Math.min(H * 0.85, player.targetY + gpAxisY * holdSpeed * dt));
+        }
+        if (gpFireEdge) {
+          fireKamehameha();
         }
 
         // Interpolação suave da Nuvem Voadora
@@ -1690,7 +2197,19 @@
         if (superSaiyanTimer > 0) superSaiyanTimer = Math.max(0, superSaiyanTimer - dt);
         if (invincibleTimer > 0) invincibleTimer = Math.max(0, invincibleTimer - dt);
         if (shenlongBannerTimer > 0) shenlongBannerTimer = Math.max(0, shenlongBannerTimer - dt);
-        if (kameCooldown > 0) kameCooldown = Math.max(0, kameCooldown - dt);
+        if (comboTimer > 0) {
+          comboTimer = Math.max(0, comboTimer - dt);
+          if (comboTimer === 0 && comboCount > 0) {
+            comboCount = 0;
+          }
+        }
+        if (kameCooldown > 0) {
+          kameCooldown = Math.max(0, kameCooldown - dt);
+        }
+        // Input Systems Skill: se havia um comando de Kamehameha no buffer e o cooldown terminou, dispara imediatamente!
+        if (kameCooldown <= 0 && actionBuffer.consume("kame", gameClock, 0.18)) {
+          executeKamehamehaNow();
+        }
 
         // Atualiza feixes de Kamehameha e verifica destruição das Montanhas de Pedras
         for (let bIdx = kamehamehaBeams.length - 1; bIdx >= 0; bIdx--) {
@@ -1708,9 +2227,21 @@
             if (m.isStoneMountain && m.stoneBarrierAlive) {
               if (Math.abs(b.y - m.gapCenterY) < (m.bottomY - m.topHeight) * 0.72 + b.height) {
                 m.stoneBarrierAlive = false;
-                score += 50;
+                comboCount++;
+                comboTimer = 4.8;
+                const bonus = 50 + Math.min(100, (comboCount - 1) * 15);
+                score += bonus;
                 sfxRockShatter();
+                addTrauma(0.42);
+                triggerHitStop(0.048, 0.08);
                 spawnRockExplosion(m.x + m.width * 0.5, m.gapCenterY, 28);
+                spawnFloatingText(
+                  m.x + m.width * 0.5,
+                  m.gapCenterY - 12,
+                  comboCount >= 2 ? `💥 +${bonus} (x${comboCount}!)` : `💥 +${bonus}!`,
+                  "#00f5d4",
+                  1.18
+                );
               }
             }
 
@@ -1718,26 +2249,30 @@
             if (m.isStoneMountain) {
               if (m.topHeight > 10 && b.y - b.height < m.topHeight) {
                 spawnRockExplosion(m.x + m.width * 0.5, m.topHeight * 0.6, 18);
+                spawnFloatingText(m.x + m.width * 0.5, Math.max(60, m.topHeight * 0.6), "🪨 +30!", "#90e0ef", 1.0);
                 m.topHeight = 0;
                 score += 30;
+                addTrauma(0.28);
                 sfxRockShatter();
               }
               if (m.bottomHeight > 10 && b.y + b.height > m.bottomY) {
                 spawnRockExplosion(m.x + m.width * 0.5, m.bottomY + m.bottomHeight * 0.4, 18);
+                spawnFloatingText(m.x + m.width * 0.5, Math.min(H - 60, m.bottomY + 30), "🪨 +30!", "#90e0ef", 1.0);
                 m.bottomY = H;
                 m.bottomHeight = 0;
                 score += 30;
+                addTrauma(0.28);
                 sfxRockShatter();
               }
             }
           }
 
           if (b.timer <= 0) {
-            kamehamehaBeams.splice(bIdx, 1);
+            removeAtSwap(kamehamehaBeams, bIdx);
           }
         }
 
-        // Atualiza fragmentos de rocha
+        // Atualiza fragmentos de rocha (usando Object Pool + Swap-and-Pop)
         for (let dIdx = rockDebris.length - 1; dIdx >= 0; dIdx--) {
           const d = rockDebris[dIdx];
           d.x += d.vx * dt;
@@ -1745,12 +2280,28 @@
           d.vy += 480 * dt;
           d.rot += d.vrot * dt;
           d.life -= dt;
-          if (d.life <= 0) rockDebris.splice(dIdx, 1);
+          if (d.life <= 0) {
+            rockDebrisPool.push(d);
+            removeAtSwap(rockDebris, dIdx);
+          }
+        }
+
+        // Atualiza textos flutuantes (em realDt para continuar suaves durante hit-stop)
+        for (let tIdx = floatingTexts.length - 1; tIdx >= 0; tIdx--) {
+          const ft = floatingTexts[tIdx];
+          ft.x += ft.vx * realDt;
+          ft.y += ft.vy * realDt;
+          ft.vy *= Math.pow(0.18, realDt); // Desacelera suavemente (ease-out)
+          ft.life -= realDt;
+          if (ft.life <= 0) {
+            floatingTextPool.push(ft);
+            removeAtSwap(floatingTexts, tIdx);
+          }
         }
 
         // Atualiza pontuação por distância
         score += dt * (superSaiyanTimer > 0 ? 18 : 10);
-        updateHud();
+        updateHud(false);
 
         // Move e desenha montanhas
         for (let i = mountains.length - 1; i >= 0; i--) {
@@ -1775,6 +2326,8 @@
               m.bottomY = H;
               m.bottomHeight = 0;
               score += 25;
+              addTrauma(0.32);
+              spawnFloatingText(player.x + 60, player.y - 30, "⚡ SSJ SMASH +25!", "#ffd166", 1.12);
               sfxDragonBall();
             } else if (invincibleTimer <= 0) {
               if (hitStoneWall) {
@@ -1783,18 +2336,23 @@
                 spawnRockExplosion(m.x + m.width * 0.5, m.gapCenterY, 18);
               }
               lives -= 1;
+              comboCount = 0;
+              comboTimer = 0;
               invincibleTimer = 1.8;
-              flashTimer = 0.25;
+              flashTimer = 0.22; // Limite seguro de fotossensibilidade (WCAG 2.3.1)
+              player.flashWhiteTimer = 0.12;
+              triggerPlayerPop(0.76, 1.28, 0.24, -22);
+              addTrauma(0.68);
+              triggerHitStop(0.085, 0.05);
               sfxHit();
-              const hudFrame = document.getElementById("thomasHudFrame");
-              if (hudFrame) {
-                hudFrame.classList.remove("hit-shake");
-                void hudFrame.offsetWidth;
-                hudFrame.classList.add("hit-shake");
+              if (domCache.thomasHudFrame) {
+                domCache.thomasHudFrame.classList.remove("hit-shake");
+                void domCache.thomasHudFrame.offsetWidth;
+                domCache.thomasHudFrame.classList.add("hit-shake");
               }
               // Empurra suavemente o jogador para o centro da passagem da montanha!
               player.targetY = m.gapCenterY;
-              updateHud();
+              updateHud(true);
               if (lives <= 0) {
                 gameOver();
               }
@@ -1832,6 +2390,9 @@
               collectedStars.add(db.stars);
               score += 25;
               sfxDragonBall();
+              triggerPlayerPop(1.18, 0.85, 0.18, 6);
+              addTrauma(0.14);
+              spawnFloatingText(db.x, db.y - 18, `🟠 ${db.stars}★ +25!`, "#ffb703", 1.1);
 
               // Se completou as 7 Esferas do Dragão -> Invoca Shenlong + Modo Super Saiyajin + Vida Extra!
               if (collectedStars.size >= 7) {
@@ -1840,23 +2401,27 @@
                 shenlongBannerTimer = 4.0;
                 lives = Math.min(maxLives, lives + 1);
                 score += 150;
+                addTrauma(0.55);
+                triggerHitStop(0.09, 0.12);
+                triggerPlayerPop(1.35, 0.72, 0.32, 0);
+                spawnFloatingText(player.x + 40, player.y - 55, "🐉 SHENLONG! SUPER SAIYAJIN +150!", "#fff3b0", 1.35);
                 sfxShenlong();
               }
-              updateHud();
+              updateHud(true);
             }
           }
 
-          if (db.x < -100) dragonBalls.splice(i, 1);
+          if (db.x < -100) removeAtSwap(dragonBalls, i);
         }
 
         // Desenha Pai e Filho voando + Feixe de Kamehameha e Fragmentos de Rocha
         drawPlayers(now);
         drawKamehamehaAndDebris();
 
-        // Efeito visual de esbarrão
+        // Efeito visual de esbarrão (respeitando limite de contraste/fotossensibilidade WCAG 2.3.1)
         if (flashTimer > 0) {
-          flashTimer = Math.max(0, flashTimer - dt);
-          ctx.fillStyle = `rgba(230, 57, 70, ${flashTimer * 1.2})`;
+          flashTimer = Math.max(0, flashTimer - realDt);
+          ctx.fillStyle = `rgba(230, 57, 70, ${Math.min(0.32, flashTimer * 1.1)})`;
           ctx.fillRect(0, 0, W, H);
         }
       } else {
@@ -1866,9 +2431,10 @@
         drawPlayers(now);
       }
 
+      ctx.restore();
       requestAnimationFrame(loop);
     }
-    updateHud();
+    updateHud(true);
     requestAnimationFrame(loop);
   </script>
 </body>
